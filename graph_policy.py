@@ -23,7 +23,7 @@ from stable_baselines3.common.distributions import (
     make_proba_distribution,
 )
 
-from .geometric import collate
+
 from .functional import (
     choose_node,
     sample_action_and_node,
@@ -76,6 +76,8 @@ class GNNPolicy(BasePolicy):
         observation_space: gym.spaces.Space,
         action_space: gym.spaces.Space,
         lr_schedule: Schedule,
+        mask_func,
+        batch_func,
         net_arch: Optional[List[Union[int, Dict[str, List[int]]]]] = None,
         activation_fn: Type[nn.Module] = nn.LeakyReLU,
         ortho_init: bool = True,
@@ -131,6 +133,9 @@ class GNNPolicy(BasePolicy):
         ) #TODO
         self.features_dim = self.features_extractor.features_dim
         self.edge_dim = 1
+
+        self.create_masks = mask_func
+        self.collate = batch_func    
 
         self.log_std_init = log_std_init
         dist_kwargs = None
@@ -317,9 +322,10 @@ class GNNPolicy(BasePolicy):
             for the actor, the value function and for gSDE function
         """
 
-        nodes, edge_index, edge_attr, batch_idx, num_graphs = collate(obs)
+        nodes, edge_index, edge_attr, batch_idx, num_graphs = self.collate(obs)
         
         latent_nodes = self.features_extractor(nodes)
+
         latent_global = th.zeros(
             (num_graphs, self.emb_size), dtype=th.float32, device=latent_nodes.device
         )
@@ -333,6 +339,8 @@ class GNNPolicy(BasePolicy):
         )
 
         return latent_nodes, latent_global, batch_idx
+    
+
 
     def _get_action_from_latent(
         self,
@@ -354,8 +362,8 @@ class GNNPolicy(BasePolicy):
         """
         # mean_actions = self.action_net(latent_pi)
 
-        action_mask = obs["mask_0"].bool()
-        node_mask = obs["mask_1"][~obs["node_padding_mask"].bool()].bool().flatten()
+        action_mask, node_mask = self.create_masks(obs)
+
 
         if isinstance(self.action_dist, MultiCategoricalDistribution):
             return self.action_func(

@@ -36,7 +36,7 @@ class GNNExtractor(nn.Module):
         )
         device = get_device(device)
 
-    def forward(
+    def forward(  
         self,
         node_features: th.Tensor,
         global_features: th.Tensor,
