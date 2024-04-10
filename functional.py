@@ -1,11 +1,8 @@
 from typing import List, Optional, Tuple
 
-
+import numpy as np
 import torch as th
 from torch import Tensor, nn
-import numpy as np
-
-
 from torch_geometric.utils import softmax
 
 
@@ -39,7 +36,7 @@ def segmented_sample(probs, splits: List[int]):
         for x in probs_split
     ]
 
-    return th.cat(samples)
+    return th.stack(samples)
 
 
 @th.jit.script
@@ -73,7 +70,7 @@ def data_splits_and_starts(batch: Tensor) -> Tuple[List[int], Tensor]:
 @th.jit.script
 def sample_action(p: Tensor):
     a = th.multinomial(p, 1)
-    return a.squeeze()
+    return a
 
 
 @th.jit.script
@@ -91,18 +88,18 @@ def masked_entropy(p: Tensor, mask: Tensor):
 
 
 @th.jit.script
-def choose_node(x_a1: Tensor, mask: Tensor, batch: Tensor):
+def sample_node(x: Tensor, mask: Tensor, batch: Tensor):
     data_splits, data_starts = data_splits_and_starts(batch)
-
-    p = masked_segmented_softmax(x_a1, mask, batch)
+    mask = th.ones(x.shape[0], device=x.device, dtype=th.bool)
+    p = masked_segmented_softmax(x, mask, batch)
     a = segmented_sample(p, data_splits)
     h = masked_entropy(p, mask)
 
-    return a.squeeze(), p, data_starts, h
+    return a, p, data_starts, h
 
 
 @th.jit.script
-def choose_action_given_node(
+def sample_action_given_node(
     node_embeds: Tensor, node: Tensor, mask: Tensor, batch: Tensor
 ):
     # only the activations for the selected nodes are kept.
@@ -125,7 +122,7 @@ def graph_action(x: Tensor, mask: Tensor):
 
 
 @th.jit.script
-def choose_node_given_action(
+def sample_node_given_action(
     node_embeds: Tensor,
     action: Tensor,  # type: ignore
     batch: Tensor,
@@ -152,7 +149,7 @@ def sample_action_and_node(
     a0_mask: Tensor,
     a1_mask: Tensor,
     batch: Tensor,
-    eval_action=None,
+    eval_action: Optional[Tensor] = None,
 ):
     a1, pa1, entropy1 = graph_action(graph_embeds, a0_mask)
     if eval_action is not None:
@@ -160,14 +157,14 @@ def sample_action_and_node(
     a1_p = gather(pa1, a1)
 
     # x_a1 = self.action_net2(batch.x).flatten()
-    a2, pa2, data_starts, entropy2 = choose_node(node_embeds, a1_mask, batch)
+    a2, pa2, data_starts, entropy2 = sample_node(node_embeds, a1_mask, batch)
     if eval_action is not None:
         a2 = eval_action[:, 1].long()
     a2_p = segmented_gather(pa2, a2, data_starts)
 
     tot_log_prob = th.log(a1_p * a2_p)
 
-    return th.stack((a1, a2), dim=1), tot_log_prob, entropy1 * entropy2
+    return th.cat((a1, a2), dim=-1), tot_log_prob, entropy1 * entropy2
 
 
 @th.jit.script
@@ -177,13 +174,13 @@ def sample_action_then_node(
     a0_mask: Tensor,
     a1_mask: Tensor,
     batch: Tensor,
-    eval_action=None,
+    eval_action: Optional[Tensor] = None,
 ):
     a1, pa1, entropy1 = graph_action(graph_embeds, a0_mask)
     if eval_action is not None:
         a1 = eval_action[:, 0].long()
 
-    a2, pa2, data_starts, entropy2 = choose_node_given_action(
+    a2, pa2, data_starts, entropy2 = sample_node_given_action(
         node_embeds, a1, batch, a1_mask
     )
     if eval_action is not None:
@@ -193,7 +190,7 @@ def sample_action_then_node(
     a2_p = segmented_gather(pa2, a2, data_starts)
     tot_log_prob = th.log(a1_p * a2_p)
 
-    return th.stack((a1, a2), dim=-1), tot_log_prob, entropy1 * entropy2
+    return th.cat((a1, a2), dim=-1), tot_log_prob, entropy1 * entropy2
 
 
 @th.jit.script
@@ -203,15 +200,15 @@ def sample_node_then_action(
     a0_mask: Tensor,
     a1_mask: Tensor,
     batch: Tensor,
-    eval_action: Optional[Tensor] =None,
+    eval_action: Optional[Tensor] = None,
 ):
-    a1, pa1, data_starts, entropy1 = choose_node(node_embeds, a0_mask, batch)
+    a1, pa1, data_starts, entropy1 = sample_node(node_embeds, a0_mask, batch)
     if eval_action is not None:
         a1 = eval_action[:, 1].long()
     a1_p = segmented_gather(pa1, a1, data_starts)  # probabilities of the selected nodes
 
     # batch = self._propagate_choice(batch,a1,data_starts)
-    a2, pa2, _, entropy2 = choose_action_given_node(
+    a2, pa2, _, entropy2 = sample_action_given_node(
         node_action_embeds, a1, a1_mask, batch
     )
     if eval_action is not None:
@@ -221,7 +218,7 @@ def sample_node_then_action(
     tot_log_prob = th.log(a1_p * a2_p)
 
     return (
-        th.stack((a2, a1), dim=-1).view(data_starts.shape[0],-1),
+        th.cat((a2, a1), dim=-1),
         tot_log_prob,
         entropy1 * entropy2,
     )
