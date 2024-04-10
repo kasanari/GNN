@@ -1,10 +1,10 @@
-import torch
 import numpy as np
+import torch
 import torch_geometric
-
-from torch.nn import Module, Sequential, Linear, LeakyReLU, ModuleList
+from torch.nn import LeakyReLU, Linear, Module, ModuleList, Sequential
 from torch_geometric.nn import MessagePassing
 from torch_geometric.nn.aggr import AttentionalAggregation
+
 
 def get_start_indices(splits):
     splits = torch.roll(splits, 1)

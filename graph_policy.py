@@ -3,36 +3,22 @@ from functools import partial
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 import gymnasium as gym
-import torch as th
-from torch import Tensor, nn
 import numpy as np
-
-
-from stable_baselines3.common.policies import BasePolicy
-from stable_baselines3.common.torch_layers import (
-    BaseFeaturesExtractor,
-    FlattenExtractor,
-)
-from stable_baselines3.common.type_aliases import Schedule
+import torch as th
 from stable_baselines3.common.distributions import (
-    BernoulliDistribution,
-    CategoricalDistribution,
-    DiagGaussianDistribution,
-    MultiCategoricalDistribution,
-    StateDependentNoiseDistribution,
-    make_proba_distribution,
-)
+    BernoulliDistribution, CategoricalDistribution, DiagGaussianDistribution,
+    MultiCategoricalDistribution, StateDependentNoiseDistribution,
+    make_proba_distribution)
+from stable_baselines3.common.policies import BasePolicy
+from stable_baselines3.common.torch_layers import (BaseFeaturesExtractor,
+                                                   FlattenExtractor)
+from stable_baselines3.common.type_aliases import Schedule
+from torch import Tensor, nn
 
-
-from .functional import (
-    choose_node,
-    sample_action_and_node,
-    sample_action_then_node,
-    sample_node_then_action,
-    segmented_gather,
-)
+from .functional import (sample_action_and_node, sample_action_then_node,
+                         sample_node, sample_node_then_action,
+                         segmented_gather)
 from .gnn_extractor import GNNExtractor
-
 from .graph_net import MultiMessagePassing
 from .node_extractor import NodeExtractor
 

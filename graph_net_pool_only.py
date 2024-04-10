@@ -1,9 +1,7 @@
 import torch
-
-from torch.nn import Module, Sequential, Linear, LeakyReLU, ModuleList
+from torch.nn import LeakyReLU, Linear, Module, ModuleList, Sequential
 from torch_geometric.nn import MessagePassing
 from torch_geometric.nn.aggr import AttentionalAggregation
-
 
 # def _recurse(gnns, x, edge_index, edge_attr):
 #     if len(gnns) == 1:

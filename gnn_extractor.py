@@ -1,10 +1,8 @@
 from typing import Tuple, Type, Union
 
 import torch as th
-from torch import nn
-
 from stable_baselines3.common.utils import get_device
-
+from torch import nn
 
 
 class GNNExtractor(nn.Module):

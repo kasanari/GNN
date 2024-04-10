@@ -1,10 +1,8 @@
-from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from typing import Type
 
 import gymnasium as gym
+from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from torch import Tensor, nn
-
-
 from torch_geometric.data import Batch
 
 
