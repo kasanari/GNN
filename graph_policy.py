@@ -96,14 +96,6 @@ class GNNPolicy(BasePolicy):
             squash_output=squash_output,
         )
 
-        # Default network architecture, from stable-baselines
-        if net_arch is None:
-            if features_extractor_class == FlattenExtractor:
-                net_arch = [dict(pi=[64, 64], vf=[64, 64])]
-            else:
-                net_arch = []
-
-        self.net_arch = net_arch
         self.activation_fn = activation_fn
         self.ortho_init = ortho_init
         self.gnn_steps = kwargs.pop("gnn_steps", 3)
@@ -112,6 +104,9 @@ class GNNPolicy(BasePolicy):
             if features_extractor_kwargs
             else 32
         )
+
+        self.separate_actor_critic = kwargs.pop("separate_actor_critic", True)
+
         action_mode = kwargs.pop("action_mode", "action_then_node")
 
         self.features_extractor = features_extractor_class(
@@ -201,6 +196,16 @@ class GNNPolicy(BasePolicy):
             steps=self.gnn_steps,
         )
 
+        if self.separate_actor_critic:
+            self.vf_gnn_extractor = GNNExtractor(
+                gnn_class,
+                self.emb_size,
+                edge_dim=self.edge_dim,
+                activation_fn=self.activation_fn,
+                device=self.device,
+                steps=self.gnn_steps,
+            )
+
         emb_size = self.emb_size
         latent_dim_pi = emb_size
 
@@ -266,6 +271,7 @@ class GNNPolicy(BasePolicy):
             module_gains = {
                 self.features_extractor: np.sqrt(2),
                 self.gnn_extractor: np.sqrt(2),
+                self.vf_gnn_extractor: np.sqrt(2),
                 self.action_net: 0.01,
                 self.action_net2: 0.01,
                 self.value_net: 1,
@@ -288,9 +294,9 @@ class GNNPolicy(BasePolicy):
         :param deterministic: Whether to sample or use deterministic actions
         :return: action, value and log probability of the action
         """
-        node_embeds, graph_embeds, batch_idx = self._get_latent(obs)
+        node_embeds, graph_embeds, batch_idx, vf_embed = self._get_latent(obs)
         
-        values = self.value_net(graph_embeds)
+        values = self.value_net(vf_embed)
 
         # Evaluate the values for the given observations
         actions, log_prob, _ = self._get_action_from_latent(
@@ -298,7 +304,7 @@ class GNNPolicy(BasePolicy):
         )
         return actions, values, log_prob
 
-    def _get_latent(self, obs: Dict[str, Tensor]) -> Tuple[th.Tensor, th.Tensor, th.Tensor]:
+    def _get_latent(self, obs: Dict[str, Tensor]) -> Tuple[th.Tensor, th.Tensor, th.Tensor, th.Tensor]:
         """
         Get the latent code (i.e., activations of the last layer of each network)
         for the different networks.
@@ -324,7 +330,15 @@ class GNNPolicy(BasePolicy):
             batch_idx,
         )
 
-        return latent_nodes, latent_global, batch_idx
+        latent_vf = self.vf_gnn_extractor(
+            latent_nodes,
+            latent_global,
+            edge_attr,
+            edge_index,
+            batch_idx,
+        )[1] if self.separate_actor_critic else latent_global
+
+        return latent_nodes, latent_global, batch_idx, latent_vf
     
 
 
@@ -363,7 +377,7 @@ class GNNPolicy(BasePolicy):
 
         elif isinstance(self.action_dist, CategoricalDistribution):
             x_a1 = self.action_net(node_latent)
-            a1, pa1, data_starts, entropy = choose_node(x_a1, node_mask, batch_idx)
+            a1, pa1, data_starts, entropy = sample_node(x_a1, node_mask, batch_idx)
             if eval_action is not None:
                 a1 = eval_action.long()
 
@@ -436,14 +450,14 @@ class GNNPolicy(BasePolicy):
         :param deterministic: Whether to use stochastic or deterministic actions
         :return: Taken action according to the policy
         """
-        latent_nodes, latent_global, batch_idx = self._get_latent(obs)
+        latent_nodes, latent_global, batch_idx, _ = self._get_latent(obs)
         actions, log_prob, entropy = self._get_action_from_latent(obs, latent_nodes, latent_global, batch_idx)
         return actions
 
     # REQUIRED FOR ON-POLICY ALGORITHMS (in SB3)
     def predict_values(self, obs: Dict[str, Tensor]) -> th.Tensor:
-        _, latent_global, _ = self._get_latent(obs)
-        values = self.value_net(latent_global)
+        _, _, _, vf_embed = self._get_latent(obs)
+        values = self.value_net(vf_embed)
         return values
 
     # REQUIRED FOR ON-POLICY ALGORITHMS
@@ -460,7 +474,7 @@ class GNNPolicy(BasePolicy):
             and entropy of the action distribution.
         """
 
-        latent_nodes, latent_global, batch_idx = self._get_latent(obs)
+        latent_nodes, latent_global, batch_idx, vf_embed = self._get_latent(obs)
         _, log_prob, entropy = self._get_action_from_latent(obs, latent_nodes, latent_global, batch_idx, eval_action=actions)
-        values = self.value_net(latent_global)
+        values = self.value_net(vf_embed)
         return values, log_prob, entropy
