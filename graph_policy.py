@@ -209,7 +209,7 @@ class GNNPolicy(BasePolicy):
         if isinstance(self.action_space, gym.spaces.MultiDiscrete):
             num_actions = self.action_space.nvec[0]
             if action_mode == "action_then_node":
-                self.action_func = self._sample_action_and_node
+                self.action_func = self._sample_action_then_node
                 self.action_net = nn.Linear(emb_size, num_actions)
                 self.action_net2 = nn.Linear(emb_size, num_actions)
             elif action_mode == "node_then_action":
