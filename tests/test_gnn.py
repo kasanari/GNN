@@ -2,13 +2,6 @@ import gnn_policy.functional as F
 import torch as th
 
 
-def test_policy():
-    test_data = {
-        "nodes": [1, 2, 3],
-        "edges": [(0, 1), (1, 2), (2, 1)],
-    }
-
-
 def data_splits_and_starts():
     batch_idx = th.tensor([0, 0, 0, 1, 1, 1])
     splits, starts = F.data_splits_and_starts(batch_idx)
