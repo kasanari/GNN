@@ -196,6 +196,8 @@ class GNNPolicy(BasePolicy):
             steps=self.gnn_steps,
         )
 
+        self.message_embed = nn.Linear(32, self.emb_size)
+
         if self.separate_actor_critic:
             self.vf_gnn_extractor = GNNExtractor(
                 gnn_class,
@@ -264,7 +266,7 @@ class GNNPolicy(BasePolicy):
         else:
             raise NotImplementedError(f"Unsupported distribution '{self.action_dist}'.")
 
-        self.value_net = nn.Linear(emb_size, 1)
+        self.value_net = nn.Linear(self.emb_size + self.emb_size, 1)
         # Init weights: use orthogonal initialization
         # with small initial weight for the output
         if self.ortho_init:
@@ -296,7 +298,10 @@ class GNNPolicy(BasePolicy):
         """
         node_embeds, graph_embeds, batch_idx, vf_embed = self._get_latent(obs)
         
-        values = self.value_net(vf_embed)
+        message_vector = obs['messages'].float()
+        message_embed = self.message_embed(message_vector)
+
+        values = self.value_net(th.concat([vf_embed, message_embed], dim=-1))
 
         # Evaluate the values for the given observations
         actions, log_prob, _ = self._get_action_from_latent(
@@ -457,7 +462,10 @@ class GNNPolicy(BasePolicy):
     # REQUIRED FOR ON-POLICY ALGORITHMS (in SB3)
     def predict_values(self, obs: Dict[str, Tensor]) -> th.Tensor:
         _, _, _, vf_embed = self._get_latent(obs)
-        values = self.value_net(vf_embed)
+        message_vector = obs['messages'].float()
+        message_embed = self.message_embed(message_vector)
+
+        values = self.value_net(th.concat([vf_embed, message_embed], dim=-1))
         return values
 
     # REQUIRED FOR ON-POLICY ALGORITHMS
@@ -476,5 +484,8 @@ class GNNPolicy(BasePolicy):
 
         latent_nodes, latent_global, batch_idx, vf_embed = self._get_latent(obs)
         _, log_prob, entropy = self._get_action_from_latent(obs, latent_nodes, latent_global, batch_idx, eval_action=actions)
-        values = self.value_net(vf_embed)
+        message_vector = obs['messages'].float()
+        message_embed = self.message_embed(message_vector)
+
+        values = self.value_net(th.concat([vf_embed, message_embed], dim=-1))
         return values, log_prob, entropy

@@ -97,7 +97,7 @@ class GlobalNode(Module):
 # ----------------------------------------------------------------------------------------
 class GraphNet(MessagePassing):
     def __init__(self, node_in_size, agg_size, node_out_size,activation_fn):
-        super().__init__(aggr='max')
+        super().__init__(aggr='sum')
 
         self.f_mess = Sequential( Linear(node_in_size, agg_size), activation_fn() )
         self.f_agg  = Sequential( Linear(node_in_size + agg_size, node_out_size), activation_fn() )

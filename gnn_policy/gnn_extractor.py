@@ -16,7 +16,7 @@ class GNNExtractor(nn.Module):
     def __init__(
         self,
         gnn_class,
-        emb_size,
+        input_size,
         edge_dim: int = 2,
         steps: int = 5,
         activation_fn: Type[nn.Module] = nn.LeakyReLU,
@@ -24,10 +24,10 @@ class GNNExtractor(nn.Module):
     ):
         super(GNNExtractor, self).__init__()
         self.gnn = gnn_class(
-            node_in_size=emb_size,
-            node_out_size=emb_size,
-            agg_size=emb_size,
-            global_size=emb_size,
+            node_in_size=input_size,
+            node_out_size=input_size,
+            agg_size=input_size,
+            global_size=input_size,
             edge_size=edge_dim,
             steps=steps,
             activation_fn=activation_fn,
