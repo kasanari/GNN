@@ -6,43 +6,6 @@ from torch_geometric.nn import MessagePassing
 from torch_geometric.nn.aggr import AttentionalAggregation
 from torch_geometric.nn.models import GIN
 
-
-def get_start_indices(splits):
-    splits = torch.roll(splits, 1)
-    splits[0] = 0
-
-    start_indices = torch.cumsum(splits, 0)
-    return start_indices
-
-
-def masked_segmented_softmax(energies, mask, start_indices, batch_ind):
-    mask = mask + start_indices
-    mask_bool = torch.ones_like(energies, dtype=torch.bool)  # inverse mask matrix
-    mask_bool[mask] = False
-
-    energies[mask_bool] = -np.inf
-    probs = torch_geometric.utils.softmax(energies, batch_ind)  # to probs ; per graph
-
-    return probs
-
-
-def segmented_sample(probs, splits):
-    probs_split = torch.split(probs, splits)
-    samples = [torch.multinomial(x, 1) for x in probs_split]
-
-    return torch.cat(samples)
-
-
-def segmented_scatter_(dest, indices, start_indices, values):
-    real_indices = start_indices + indices
-    dest[real_indices] = values
-    return dest
-
-
-def segmented_gather(src, indices, start_indices):
-    real_indices = start_indices + indices
-    return src[real_indices]
-
 def _recurse(gnns, x, edge_index):
     if len(gnns) == 1:
         y = gnns[0](x, edge_index)
