@@ -16,16 +16,17 @@ def get_start_indices(splits):
 
 @th.jit.script
 def masked_segmented_softmax(energies, mask, batch_ind):
-    energies[~mask] = -np.inf
-    probs = softmax(energies, batch_ind)
-
+    infty = th.tensor(-np.inf, device=energies.device)
+    masked_energies = th.where(mask, energies, infty)
+    probs = softmax(masked_energies, batch_ind)
     return probs.flatten()
 
 
 @th.jit.script
 def masked_softmax(x: Tensor, mask: Tensor):
-    x[~mask] = -np.inf
-    return nn.functional.softmax(x, -1)
+    infty = th.tensor(-np.inf, device=x.device)
+    masked_x = th.where(mask, x, infty)
+    return nn.functional.softmax(masked_x, -1)
 
 
 @th.jit.script
@@ -76,9 +77,10 @@ def sample_action(p: Tensor):
 @th.jit.script
 def entropy(p: Tensor):
     n = p.shape[0]
-    log_probs = th.log(p)
+    log_probs = th.log(p + 1e-9)  # to avoid log(0)
     entropy = (-p * log_probs).sum() / n
     return entropy
+
 
 @th.jit.script
 def masked_entropy(p: Tensor, mask: Tensor):
@@ -90,7 +92,6 @@ def masked_entropy(p: Tensor, mask: Tensor):
 @th.jit.script
 def sample_node(x: Tensor, mask: Tensor, batch: Tensor):
     data_splits, data_starts = data_splits_and_starts(batch)
-    mask = th.ones(x.shape[0], device=x.device, dtype=th.bool)
     p = masked_segmented_softmax(x, mask, batch)
     a = segmented_sample(p, data_splits)
     h = masked_entropy(p, mask)
@@ -131,15 +132,9 @@ def sample_node_given_action(
     # a single action is performed for each graph
     a_expanded = action[batch].view(-1, 1)
     # only the activations for the selected action are kept
-    x_a1 = node_embeds.gather(-1, a_expanded)
+    x_a1 = node_embeds.gather(-1, a_expanded).squeeze()
 
-    data_splits, data_starts = data_splits_and_starts(batch)
-
-    p = masked_segmented_softmax(x_a1, mask, batch)
-    a = segmented_sample(p, data_splits)
-    h = masked_entropy(p, mask)
-
-    return a, p, data_starts, h
+    return sample_node(x_a1, mask, batch)
 
 
 @th.jit.script
@@ -224,6 +219,35 @@ def sample_node_then_action(
     )
 
 
+@th.jit.script
+def segmented_nonzero(tnsr: Tensor, splits: List[int]):
+    x_split = th.split(tnsr, splits)
+    x_nonzero = [
+        th.nonzero(x).flatten().cpu() for x in x_split
+    ]
+    return x_nonzero
+
+
+@th.jit.script
+def segmented_prod(tnsr: Tensor, splits: List[int]):
+    x_split = th.split(tnsr, splits)
+    x_prods = [th.prod(x) for x in x_split]
+    x_mul = th.stack(x_prods)
+
+    return x_mul
+
+
+@th.jit.script
+def sample_node_set(logits: th.Tensor, mask: th.Tensor, batch):
+    data_splits, _ = data_splits_and_starts(batch)
+    a0_sel = logits.bernoulli().to(th.uint8)
+    af_selection = segmented_nonzero(a0_sel, data_splits)
+
+    a0_prob = th.where(a0_sel, logits, 1 - logits)
+    af_probs = segmented_prod(a0_prob, data_splits)
+    return af_selection, af_probs
+
+
 def _propagate_choice(
     self, batch, choice: th.Tensor, data_starts: th.Tensor
 ) -> Tuple[th.Tensor, th.Tensor]:
@@ -232,7 +256,7 @@ def _propagate_choice(
 
     :param latent_pi: Latent code for the actor
     :param latent_sde: Latent code for the gSDE exploration function
-    :return: Action distribution    
+    :return: Action distribution
     """
     selected_ind = th.zeros(len(batch.x), 1, device=self.device)
     segmented_scatter_(selected_ind, choice, data_starts, 1.0)

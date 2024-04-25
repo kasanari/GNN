@@ -19,7 +19,7 @@ from .functional import (sample_action_and_node, sample_action_then_node,
                          sample_node, sample_node_then_action,
                          segmented_gather)
 from .gnn_extractor import GNNExtractor
-from .graph_net import MultiMessagePassing
+from .gnns import MultiMessagePassing
 from .node_extractor import NodeExtractor
 
 
