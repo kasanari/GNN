@@ -217,16 +217,16 @@ class GNNPolicy(BasePolicy):
             num_actions = self.action_space.nvec[0]
             if action_mode == "action_then_node":
                 self.action_func = self._sample_action_then_node
-                self.action_net = nn.Linear(emb_size, num_actions)
-                self.action_net2 = nn.Linear(emb_size, num_actions)
+                self.action_net = nn.Linear(emb_size *2, num_actions)
+                self.action_net2 = nn.Linear(emb_size *2, num_actions)
             elif action_mode == "node_then_action":
                 self.action_func = self._sample_node_then_action
-                self.action_net = nn.Linear(emb_size, 1)
-                self.action_net2 = nn.Linear(emb_size, num_actions)
+                self.action_net = nn.Linear(emb_size*2, 1)
+                self.action_net2 = nn.Linear(emb_size*2, num_actions)
             elif action_mode == "independent":
                 self.action_func = self._sample_action_and_node
-                self.action_net = nn.Linear(emb_size, num_actions)
-                self.action_net2 = nn.Linear(emb_size, 1)
+                self.action_net = nn.Linear(emb_size*2, num_actions)
+                self.action_net2 = nn.Linear(emb_size*2, 1)
 
             # self.action_net = nn.Linear(EMB_SIZE, 1)
             # self.action_net2 = nn.Linear(EMB_SIZE, 1)
@@ -296,20 +296,19 @@ class GNNPolicy(BasePolicy):
         :param deterministic: Whether to sample or use deterministic actions
         :return: action, value and log probability of the action
         """
-        node_embeds, graph_embeds, batch_idx, vf_embed = self._get_latent(obs)
+        node_embeds, graph_embeds, batch_idx, vf_embed, message_embed = self._get_latent(obs)
         
-        message_vector = obs['messages'].float()
-        message_embed = self.message_embed(message_vector)
+
 
         values = self.value_net(th.concat([vf_embed, message_embed], dim=-1))
 
         # Evaluate the values for the given observations
         actions, log_prob, _ = self._get_action_from_latent(
-            obs, node_embeds, graph_embeds, batch_idx, deterministic=deterministic
+            obs, node_embeds, graph_embeds, batch_idx, message_embed, deterministic=deterministic
         )
         return actions, values, log_prob
 
-    def _get_latent(self, obs: Dict[str, Tensor]) -> Tuple[th.Tensor, th.Tensor, th.Tensor, th.Tensor]:
+    def _get_latent(self, obs: Dict[str, Tensor]) -> Tuple[th.Tensor, th.Tensor, th.Tensor, th.Tensor, th.Tensor]:
         """
         Get the latent code (i.e., activations of the last layer of each network)
         for the different networks.
@@ -318,6 +317,9 @@ class GNNPolicy(BasePolicy):
         :return: Latent codes
             for the actor, the value function and for gSDE function
         """
+
+        message_vector = obs['messages'].float()
+        message_embed = self.message_embed(message_vector)
 
         nodes, edge_index, edge_attr, batch_idx, num_graphs = self.collate(obs)
         
@@ -343,7 +345,7 @@ class GNNPolicy(BasePolicy):
             batch_idx,
         )[1] if self.separate_actor_critic else latent_global
 
-        return latent_nodes, latent_global, batch_idx, latent_vf
+        return latent_nodes, latent_global, batch_idx, latent_vf, message_embed
     
 
 
@@ -353,7 +355,7 @@ class GNNPolicy(BasePolicy):
         node_latent: Tensor,
         graph_latent: Tensor,
         batch_idx: Tensor,
-        latent_sde: Optional[th.Tensor] = None,
+        message_embed,
         deterministic: bool = False,
         eval_action=None,
     ):
@@ -377,7 +379,9 @@ class GNNPolicy(BasePolicy):
                 action_mask,
                 node_mask,
                 batch_idx,
+                message_embed,
                 eval_action,
+                deterministic,
             )
 
         elif isinstance(self.action_dist, CategoricalDistribution):
@@ -417,31 +421,35 @@ class GNNPolicy(BasePolicy):
         action_mask,
         node_mask,
         batch,
+        message_embed,
         eval_action=None,
+        deterministic=False,
     ):
-        x1 = self.action_net(node_latent)
-        x2 = self.action_net2(node_latent)
+        x1 = self.action_net(th.cat((node_latent, message_embed), dim=-1))
+        x2 = self.action_net2(th.cat((node_latent, message_embed), dim=-1))
         # note that the action_masks are reversed here, since we now pick the node first
         return sample_node_then_action(
-            x1, x2, node_mask, action_mask, batch, eval_action
+            x1, x2, node_mask, action_mask, batch, eval_action, deterministic
         )
 
     def _sample_action_and_node(
-        self, node_latent, graph_latent, action_mask, node_mask, batch, eval_action=None
+        self, node_latent, graph_latent, action_mask, node_mask, batch, eval_action=None,
+        deterministic=False,
     ):
         x1 = self.action_net(graph_latent)
         x2 = self.action_net2(node_latent)
         return sample_action_and_node(
-            x1, x2, action_mask, node_mask, batch, eval_action
+            x1, x2, action_mask, node_mask, batch, eval_action, deterministic
         )
 
     def _sample_action_then_node(
-        self, node_latent, graph_latent, action_mask, node_mask, batch, eval_action=None
+        self, node_latent, graph_latent, action_mask, node_mask, batch, message_embed:Tensor, eval_action=None,
+        deterministic=False,
     ):
-        x1 = self.action_net(graph_latent)
-        x2 = self.action_net2(node_latent)
+        x1 = self.action_net(th.cat((graph_latent, message_embed), dim=-1))
+        x2 = self.action_net2(th.cat((node_latent, message_embed[batch]), dim=-1))
         return sample_action_then_node(
-            x1, x2, action_mask, node_mask, batch, eval_action
+            x1, x2, action_mask, node_mask, batch, eval_action, deterministic
         )
 
     # REQUIRED FOR ON-POLICY ALGORITHMS (in SB3)
@@ -455,15 +463,13 @@ class GNNPolicy(BasePolicy):
         :param deterministic: Whether to use stochastic or deterministic actions
         :return: Taken action according to the policy
         """
-        latent_nodes, latent_global, batch_idx, _ = self._get_latent(obs)
-        actions, log_prob, entropy = self._get_action_from_latent(obs, latent_nodes, latent_global, batch_idx)
+        latent_nodes, latent_global, batch_idx, _, message_embed = self._get_latent(obs)
+        actions, log_prob, entropy = self._get_action_from_latent(obs, latent_nodes, latent_global, batch_idx, message_embed, deterministic)
         return actions
 
     # REQUIRED FOR ON-POLICY ALGORITHMS (in SB3)
     def predict_values(self, obs: Dict[str, Tensor]) -> th.Tensor:
-        _, _, _, vf_embed = self._get_latent(obs)
-        message_vector = obs['messages'].float()
-        message_embed = self.message_embed(message_vector)
+        _, _, _, vf_embed, message_embed = self._get_latent(obs)
 
         values = self.value_net(th.concat([vf_embed, message_embed], dim=-1))
         return values
@@ -482,10 +488,7 @@ class GNNPolicy(BasePolicy):
             and entropy of the action distribution.
         """
 
-        latent_nodes, latent_global, batch_idx, vf_embed = self._get_latent(obs)
-        _, log_prob, entropy = self._get_action_from_latent(obs, latent_nodes, latent_global, batch_idx, eval_action=actions)
-        message_vector = obs['messages'].float()
-        message_embed = self.message_embed(message_vector)
-
+        latent_nodes, latent_global, batch_idx, vf_embed, message_embed = self._get_latent(obs)
+        _, log_prob, entropy = self._get_action_from_latent(obs, latent_nodes, latent_global, batch_idx, message_embed, eval_action=actions)
         values = self.value_net(th.concat([vf_embed, message_embed], dim=-1))
         return values, log_prob, entropy
