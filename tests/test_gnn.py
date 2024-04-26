@@ -148,7 +148,7 @@ def test_sample_action_and_node():
     mask2 = th.tensor([True, True, False])
     batch = th.tensor([0, 0, 0])
 
-    a, p, h = F.sample_action_and_node(
+    a, logprob, h = F.sample_action_and_node(
         x1,
         x2,
         mask1,
@@ -156,6 +156,7 @@ def test_sample_action_and_node():
         batch,
     )
     assert (a == th.tensor([[0, 0]])).all()
+    assert logprob.shape == (1,1)
 
 
 def test_sample_action_then_node():
@@ -165,7 +166,7 @@ def test_sample_action_then_node():
     mask2 = th.tensor([True, True, False])
     batch = th.tensor([0, 0, 0])
 
-    a, p, h = F.sample_action_then_node(
+    a, logprob, h = F.sample_action_then_node(
         x1,
         x2,
         mask1,
@@ -173,6 +174,7 @@ def test_sample_action_then_node():
         batch,
     )
     assert (a == th.tensor([[0, 0]])).all()
+    assert logprob.shape == (1,1)
 
 
 def test_sample_node_then_action():
@@ -182,7 +184,7 @@ def test_sample_node_then_action():
     mask2 = th.tensor([[True, False]])
     batch = th.tensor([0, 0, 0])
 
-    a, p, h = F.sample_node_then_action(
+    a, logprob, h = F.sample_node_then_action(
         x1,
         x2,
         mask1,
@@ -190,13 +192,15 @@ def test_sample_node_then_action():
         batch,
     )
     assert (a == th.tensor([[0, 0]])).all()
+    assert logprob.shape == (1,1)
 
 
 def test_sample_node_set():
     x = th.tensor([1.0, 1.0, 0.0])
     mask = th.tensor([True, True, False])
     batch = th.tensor([0, 0, 0])
-    a, p = F.sample_node_set(x, mask, batch)
+    a, logprob = F.sample_node_set(x, mask, batch)
     assert (a[0] == th.tensor([0, 1])).all()
+    assert logprob.shape == (1,)
 
     pass

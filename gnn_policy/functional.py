@@ -19,7 +19,7 @@ def masked_segmented_softmax(energies, mask, batch_ind):
     infty = th.tensor(-np.inf, device=energies.device)
     masked_energies = th.where(mask, energies, infty)
     probs = softmax(masked_energies, batch_ind)
-    return probs.flatten()
+    return probs
 
 
 @th.jit.script
@@ -33,7 +33,9 @@ def masked_softmax(x: Tensor, mask: Tensor):
 def segmented_sample(probs, splits: List[int]):
     probs_split = th.split(probs, splits)
     samples = [
-        th.multinomial(x + 1e-5, 1) if sum(x) == 0 else th.multinomial(x, 1)
+        th.randint(high=len(x.squeeze(-1)), size=(1,))
+        if x.squeeze(-1).sum() == 0 or x.squeeze(-1).sum().isnan()
+        else th.multinomial(x.squeeze(-1), 1)
         for x in probs_split
     ]
 
@@ -49,13 +51,13 @@ def segmented_scatter_(dest, indices, start_indices, values):
 
 @th.jit.script
 def segmented_gather(src, indices, start_indices):
-    real_indices = start_indices + indices
+    real_indices = start_indices + indices.squeeze()
     return src[real_indices]
 
 
 @th.jit.script
 def gather(src, indices):
-    return src.gather(1, indices.view(-1, 1)).squeeze()
+    return src.gather(-1, indices)
 
 
 @th.jit.script
@@ -75,18 +77,17 @@ def sample_action(p: Tensor):
 
 
 @th.jit.script
-def entropy(p: Tensor):
-    n = p.shape[0]
+def entropy(p: Tensor, batch_size: int):
     log_probs = th.log(p + 1e-9)  # to avoid log(0)
-    entropy = (-p * log_probs).sum() / n
+    entropy = (-p * log_probs).sum() / batch_size
     return entropy
 
 
 @th.jit.script
-def masked_entropy(p: Tensor, mask: Tensor):
+def masked_entropy(p: Tensor, mask: Tensor, batch_size: int):
     """Zero probability elements are masked out"""
     unmasked_probs = p[mask]
-    return entropy(unmasked_probs)
+    return entropy(unmasked_probs, batch_size)
 
 
 @th.jit.script
@@ -94,7 +95,7 @@ def sample_node(x: Tensor, mask: Tensor, batch: Tensor):
     data_splits, data_starts = data_splits_and_starts(batch)
     p = masked_segmented_softmax(x, mask, batch)
     a = segmented_sample(p, data_splits)
-    h = masked_entropy(p, mask)
+    h = masked_entropy(p, mask, a.shape[0])
 
     return a, p, data_starts, h
 
@@ -105,11 +106,11 @@ def sample_action_given_node(
 ):
     # only the activations for the selected nodes are kept.
     _, data_starts = data_splits_and_starts(batch)
-    x = segmented_gather(node_embeds, node, data_starts)
+    x = segmented_gather(node_embeds, node.squeeze(), data_starts)
 
     p = masked_softmax(x, mask)
     a = sample_action(p)
-    entropy = masked_entropy(p, mask)
+    entropy = masked_entropy(p, mask, a.shape[0])
 
     return a, p, data_starts, entropy
 
@@ -118,7 +119,7 @@ def sample_action_given_node(
 def graph_action(x: Tensor, mask: Tensor):
     p = masked_softmax(x, mask)
     a = sample_action(p)
-    entropy = masked_entropy(p, mask)
+    entropy = masked_entropy(p, mask, a.shape[0])
     return a, p, entropy
 
 
@@ -130,9 +131,9 @@ def sample_node_given_action(
     mask: Tensor,
 ):
     # a single action is performed for each graph
-    a_expanded = action[batch].view(-1, 1)
+    a_expanded = action[batch]
     # only the activations for the selected action are kept
-    x_a1 = node_embeds.gather(-1, a_expanded).squeeze()
+    x_a1 = node_embeds.gather(-1, a_expanded)
 
     return sample_node(x_a1, mask, batch)
 
@@ -157,7 +158,7 @@ def sample_action_and_node(
         a2 = eval_action[:, 1].long()
     a2_p = segmented_gather(pa2, a2, data_starts)
 
-    tot_log_prob = th.log(a1_p * a2_p)
+    tot_log_prob = th.log(a1_p * a2_p).squeeze(-1)
 
     return th.cat((a1, a2), dim=-1), tot_log_prob, entropy1 * entropy2
 
@@ -183,7 +184,7 @@ def sample_action_then_node(
 
     a1_p = gather(pa1, a1)
     a2_p = segmented_gather(pa2, a2, data_starts)
-    tot_log_prob = th.log(a1_p * a2_p)
+    tot_log_prob = th.log(a1_p * a2_p).squeeze(-1)
 
     return th.cat((a1, a2), dim=-1), tot_log_prob, entropy1 * entropy2
 
@@ -199,7 +200,7 @@ def sample_node_then_action(
 ):
     a1, pa1, data_starts, entropy1 = sample_node(node_embeds, a0_mask, batch)
     if eval_action is not None:
-        a1 = eval_action[:, 1].long()
+        a1 = eval_action[:, 1].long().view(-1, 1)
     a1_p = segmented_gather(pa1, a1, data_starts)  # probabilities of the selected nodes
 
     # batch = self._propagate_choice(batch,a1,data_starts)
@@ -207,10 +208,10 @@ def sample_node_then_action(
         node_action_embeds, a1, a1_mask, batch
     )
     if eval_action is not None:
-        a2 = eval_action[:, 0].long()
+        a2 = eval_action[:, 0].long().view(-1, 1)
     a2_p = gather(pa2, a2)
 
-    tot_log_prob = th.log(a1_p * a2_p)
+    tot_log_prob = th.log(a1_p * a2_p).squeeze(-1)
 
     return (
         th.cat((a2, a1), dim=-1),
@@ -222,9 +223,7 @@ def sample_node_then_action(
 @th.jit.script
 def segmented_nonzero(tnsr: Tensor, splits: List[int]):
     x_split = th.split(tnsr, splits)
-    x_nonzero = [
-        th.nonzero(x).flatten().cpu() for x in x_split
-    ]
+    x_nonzero = [th.nonzero(x).flatten().cpu() for x in x_split]
     return x_nonzero
 
 

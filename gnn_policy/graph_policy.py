@@ -105,7 +105,7 @@ class GNNPolicy(BasePolicy):
             else 32
         )
 
-        self.separate_actor_critic = kwargs.pop("separate_actor_critic", True)
+        self.separate_actor_critic = kwargs.pop("separate_actor_critic", False)
 
         action_mode = kwargs.pop("action_mode", "action_then_node")
 
@@ -271,7 +271,7 @@ class GNNPolicy(BasePolicy):
             module_gains = {
                 self.features_extractor: np.sqrt(2),
                 self.gnn_extractor: np.sqrt(2),
-                self.vf_gnn_extractor: np.sqrt(2),
+                #self.vf_gnn_extractor: np.sqrt(2),
                 self.action_net: 0.01,
                 self.action_net2: 0.01,
                 self.value_net: 1,
