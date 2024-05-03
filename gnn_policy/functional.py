@@ -18,7 +18,7 @@ def get_start_indices(splits):
 def masked_segmented_softmax(energies, mask, batch_ind):
     infty = th.tensor(-1E9, device=energies.device)
     masked_energies = th.where(mask, energies, infty)
-    probs = softmax(masked_energies, batch_ind, dim=-1)
+    probs = softmax(masked_energies, batch_ind)
     return probs
 
 
