@@ -16,15 +16,15 @@ def get_start_indices(splits):
 
 @th.jit.script
 def masked_segmented_softmax(energies, mask, batch_ind):
-    infty = th.tensor(-np.inf, device=energies.device)
+    infty = th.tensor(-1E9, device=energies.device)
     masked_energies = th.where(mask, energies, infty)
-    probs = softmax(masked_energies, batch_ind)
+    probs = softmax(masked_energies, batch_ind, dim=-1)
     return probs
 
 
 @th.jit.script
 def masked_softmax(x: Tensor, mask: Tensor):
-    infty = th.tensor(-np.inf, device=x.device)
+    infty = th.tensor(-1E9, device=x.device)
     masked_x = th.where(mask, x, infty)
     return nn.functional.softmax(masked_x, -1)
 
@@ -131,9 +131,9 @@ def sample_node_given_action(
     mask: Tensor,
 ):
     # a single action is performed for each graph
-    a_expanded = action[batch]
+    a_expanded = action[batch] #.view(-1, 1)
     # only the activations for the selected action are kept
-    x_a1 = node_embeds.gather(-1, a_expanded)
+    x_a1 = node_embeds.gather(-1, a_expanded).squeeze(-1)
 
     return sample_node(x_a1, mask, batch)
 
