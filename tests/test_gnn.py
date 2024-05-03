@@ -73,12 +73,12 @@ def test_sample_node():
 
 def test_entropy():
     p = th.tensor([[0.5, 0.5]])
-    e = F.entropy(p)
+    e = F.entropy(p, 1)
     e = e * 1 / th.log(th.tensor(2.0))
     assert e.item() == 1.0
 
     p = th.tensor([[1.0, 0.0], [1 / 2, 1 / 2]])
-    e = F.entropy(p)
+    e = F.entropy(p, 2)
     e = e * 1 / th.log(th.tensor(2.0))
     assert e.item() == 0.5
 
@@ -86,13 +86,13 @@ def test_entropy():
 def test_masked_entropy():
     p = th.tensor([[0.5, 0.5]])
     mask = th.tensor([[True, True]])
-    e = F.masked_entropy(p, mask)
+    e = F.masked_entropy(p, mask, 1)
     e = e * 1 / th.log(th.tensor(2.0))
-    assert e.item() == 0.5
+    assert e.item() == 1.0
 
     p = th.tensor([[1 / 2, 0.0, 0.0], [0.0, 1 / 2, 1.0]])
     mask = th.tensor([[True, False, False], [False, True, False]])
-    e = F.masked_entropy(p, mask)
+    e = F.masked_entropy(p, mask, 2)
     e = e * 1 / th.log(th.tensor(2.0))
     assert e.item() == 0.5
 
@@ -156,7 +156,7 @@ def test_sample_action_and_node():
         batch,
     )
     assert (a == th.tensor([[0, 0]])).all()
-    assert logprob.shape == (1,1)
+    assert logprob.shape == (1,)
 
 
 def test_sample_action_then_node():
@@ -174,7 +174,7 @@ def test_sample_action_then_node():
         batch,
     )
     assert (a == th.tensor([[0, 0]])).all()
-    assert logprob.shape == (1,1)
+    assert logprob.shape == (1,)
 
 
 def test_sample_node_then_action():
@@ -192,7 +192,7 @@ def test_sample_node_then_action():
         batch,
     )
     assert (a == th.tensor([[0, 0]])).all()
-    assert logprob.shape == (1,1)
+    assert logprob.shape == (1,)
 
 
 def test_sample_node_set():
