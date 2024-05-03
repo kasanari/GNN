@@ -98,16 +98,16 @@ class GNNPolicy(BasePolicy):
 
         self.activation_fn = activation_fn
         self.ortho_init = ortho_init
-        self.gnn_steps = kwargs.pop("gnn_steps", 3)
+        self.gnn_steps = kwargs.pop("gnn_steps")
         self.emb_size = (
             features_extractor_kwargs.get("features_dim", 32)
             if features_extractor_kwargs
             else 32
         )
 
-        self.separate_actor_critic = kwargs.pop("separate_actor_critic", False)
+        self.separate_actor_critic = kwargs.pop("separate_actor_critic")
 
-        action_mode = kwargs.pop("action_mode", "action_then_node")
+        action_mode = kwargs.pop("action_mode")
 
         self.features_extractor = features_extractor_class(
             self.observation_space, self.observation_space['nodes'].shape[-1], **self.features_extractor_kwargs
@@ -134,7 +134,7 @@ class GNNPolicy(BasePolicy):
         self.use_sde = use_sde
         self.dist_kwargs = dist_kwargs
         self.action_order = action_mode
-        self.gnn_class = kwargs.pop("gnn_class", MultiMessagePassing)
+        self.gnn_class = kwargs.pop("gnn_class")
 
         # Action distribution
         self.action_dist = make_proba_distribution(
