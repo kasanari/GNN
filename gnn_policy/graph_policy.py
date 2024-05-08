@@ -196,7 +196,10 @@ class GNNPolicy(BasePolicy):
             steps=self.gnn_steps,
         )
 
-        self.message_embed = nn.Linear(32, self.emb_size)
+        message_embed_size = 8
+        phase_embed_size = 2
+
+        self.message_embed = nn.Linear(32, message_embed_size)
 
         if self.separate_actor_critic:
             self.vf_gnn_extractor = GNNExtractor(
@@ -217,12 +220,12 @@ class GNNPolicy(BasePolicy):
             num_actions = self.action_space.nvec[0]
             if action_mode == "action_then_node":
                 self.action_func = self._sample_action_then_node
-                self.action_net = nn.Linear(emb_size *2, num_actions)
-                self.action_net2 = nn.Linear(emb_size *2, num_actions)
+                self.action_net = nn.Linear(emb_size + message_embed_size, num_actions)
+                self.action_net2 = nn.Linear(emb_size + message_embed_size, num_actions)
             elif action_mode == "node_then_action":
                 self.action_func = self._sample_node_then_action
-                self.action_net = nn.Linear(emb_size*2, 1)
-                self.action_net2 = nn.Linear(emb_size*2, num_actions)
+                self.action_net = nn.Linear(emb_size+message_embed_size, 1)
+                self.action_net2 = nn.Linear(emb_size+message_embed_size, num_actions)
             elif action_mode == "independent":
                 self.action_func = self._sample_action_and_node
                 self.action_net = nn.Linear(emb_size*2, num_actions)
@@ -266,14 +269,15 @@ class GNNPolicy(BasePolicy):
         else:
             raise NotImplementedError(f"Unsupported distribution '{self.action_dist}'.")
 
-        self.value_net = nn.Linear(self.emb_size + self.emb_size, 1)
+        self.phase_embed = nn.Linear(3, phase_embed_size)
+        self.value_net = nn.Linear(self.emb_size + phase_embed_size + message_embed_size, 1)
         # Init weights: use orthogonal initialization
         # with small initial weight for the output
         if self.ortho_init:
             module_gains = {
                 self.features_extractor: np.sqrt(2),
                 self.gnn_extractor: np.sqrt(2),
-                #self.vf_gnn_extractor: np.sqrt(2),
+                self.vf_gnn_extractor: np.sqrt(2),
                 self.action_net: 0.01,
                 self.action_net2: 0.01,
                 self.value_net: 1,
@@ -298,9 +302,9 @@ class GNNPolicy(BasePolicy):
         """
         node_embeds, graph_embeds, batch_idx, vf_embed, message_embed = self._get_latent(obs)
         
+        phase_embed = self.phase_embed(th.nn.functional.one_hot(obs["mission_phase"], 3).float())
 
-
-        values = self.value_net(th.concat([vf_embed, message_embed], dim=-1))
+        values = self.value_net(th.concat([vf_embed, message_embed, phase_embed], dim=-1))
 
         # Evaluate the values for the given observations
         actions, log_prob, _ = self._get_action_from_latent(
@@ -449,7 +453,7 @@ class GNNPolicy(BasePolicy):
         x1 = self.action_net(th.cat((graph_latent, message_embed), dim=-1))
         x2 = self.action_net2(th.cat((node_latent, message_embed[batch]), dim=-1))
         return sample_action_then_node(
-            x1, x2, action_mask, node_mask, batch, eval_action, deterministic
+            x1, x2, action_mask, node_mask, batch, eval_action,
         )
 
     # REQUIRED FOR ON-POLICY ALGORITHMS (in SB3)
@@ -471,7 +475,8 @@ class GNNPolicy(BasePolicy):
     def predict_values(self, obs: Dict[str, Tensor]) -> th.Tensor:
         _, _, _, vf_embed, message_embed = self._get_latent(obs)
 
-        values = self.value_net(th.concat([vf_embed, message_embed], dim=-1))
+        phase_embed = self.phase_embed(th.nn.functional.one_hot(obs["mission_phase"].long(), 3).float()).squeeze(-1)
+        values = self.value_net(th.concat([vf_embed, message_embed, phase_embed], dim=-1))
         return values
 
     # REQUIRED FOR ON-POLICY ALGORITHMS
@@ -490,5 +495,6 @@ class GNNPolicy(BasePolicy):
 
         latent_nodes, latent_global, batch_idx, vf_embed, message_embed = self._get_latent(obs)
         _, log_prob, entropy = self._get_action_from_latent(obs, latent_nodes, latent_global, batch_idx, message_embed, eval_action=actions)
-        values = self.value_net(th.concat([vf_embed, message_embed], dim=-1))
+        phase_embed = self.phase_embed(th.nn.functional.one_hot(obs["mission_phase"].squeeze().long(), 3).float())
+        values = self.value_net(th.concat([vf_embed, message_embed, phase_embed], dim=-1))
         return values, log_prob, entropy
