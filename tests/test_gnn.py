@@ -158,6 +158,19 @@ def test_sample_action_and_node():
     assert (a == th.tensor([[0, 0]])).all()
     assert logprob.shape == (1,)
 
+    a, eval_logprob, h = F.sample_action_and_node(
+        x1,
+        x2,
+        mask1,
+        mask2,
+        batch,
+        eval_action=a,
+    )
+
+    assert (a == th.tensor([[0, 0]])).all()
+    assert eval_logprob.shape == (1,)
+    assert eval_logprob == logprob
+
 
 def test_sample_action_then_node():
     x1 = th.tensor([[10, 100]])

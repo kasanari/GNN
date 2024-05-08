@@ -149,13 +149,13 @@ def sample_action_and_node(
 ):
     a1, pa1, entropy1 = graph_action(graph_embeds, a0_mask)
     if eval_action is not None:
-        a1 = eval_action[:, 0].long()
+        a1 = eval_action[:, 0].long().view(-1, 1)
     a1_p = gather(pa1, a1)
 
     # x_a1 = self.action_net2(batch.x).flatten()
     a2, pa2, data_starts, entropy2 = sample_node(node_embeds, a1_mask, batch)
     if eval_action is not None:
-        a2 = eval_action[:, 1].long()
+        a2 = eval_action[:, 1].long().view(-1, 1)
     a2_p = segmented_gather(pa2, a2, data_starts)
 
     tot_log_prob = th.log(a1_p * a2_p).squeeze(-1)
