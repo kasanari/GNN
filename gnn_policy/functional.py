@@ -16,7 +16,7 @@ def get_start_indices(splits):
 
 @th.jit.script
 def masked_segmented_softmax(energies, mask, batch_ind):
-    infty = th.tensor(-1E9, device=energies.device)
+    infty = th.tensor(-1e9, device=energies.device)
     masked_energies = th.where(mask, energies, infty)
     probs = softmax(masked_energies, batch_ind)
     return probs
@@ -24,7 +24,7 @@ def masked_segmented_softmax(energies, mask, batch_ind):
 
 @th.jit.script
 def masked_softmax(x: Tensor, mask: Tensor):
-    infty = th.tensor(-1E9, device=x.device)
+    infty = th.tensor(-1e9, device=x.device)
     masked_x = th.where(mask, x, infty)
     return nn.functional.softmax(masked_x, -1)
 
@@ -40,6 +40,14 @@ def segmented_sample(probs, splits: List[int]):
     ]
 
     return th.stack(samples)
+
+
+@th.jit.script
+def segmented_argmax(probs, splits: List[int]):
+    probs_split = th.split(probs, splits)
+    samples = [th.argmax(x.squeeze(-1), dim=-1) for x in probs_split]
+
+    return th.atleast_2d(th.stack(samples))
 
 
 @th.jit.script
@@ -91,25 +99,32 @@ def masked_entropy(p: Tensor, mask: Tensor, batch_size: int):
 
 
 @th.jit.script
-def sample_node(x: Tensor, mask: Tensor, batch: Tensor):
+def sample_node(x: Tensor, mask: Tensor, batch: Tensor, deterministic: bool = False):
     data_splits, data_starts = data_splits_and_starts(batch)
     p = masked_segmented_softmax(x, mask, batch)
-    a = segmented_sample(p, data_splits)
+    a = (
+        segmented_sample(p, data_splits)
+        if not deterministic
+        else segmented_argmax(p, data_splits)
+    )
     h = masked_entropy(p, mask, a.shape[0])
-
     return a, p, data_starts, h
 
 
 @th.jit.script
 def sample_action_given_node(
-    node_embeds: Tensor, node: Tensor, mask: Tensor, batch: Tensor
+    node_embeds: Tensor,
+    node: Tensor,
+    mask: Tensor,
+    batch: Tensor,
+    deterministic: bool = False,
 ):
     # only the activations for the selected nodes are kept.
     _, data_starts = data_splits_and_starts(batch)
     x = segmented_gather(node_embeds, node.squeeze(), data_starts)
 
     p = masked_softmax(x, mask)
-    a = sample_action(p)
+    a = sample_action(p) if not deterministic else th.argmax(p, dim=-1).view(-1, 1)
     entropy = masked_entropy(p, mask, a.shape[0])
 
     return a, p, data_starts, entropy
@@ -131,7 +146,7 @@ def sample_node_given_action(
     mask: Tensor,
 ):
     # a single action is performed for each graph
-    a_expanded = action[batch] #.view(-1, 1)
+    a_expanded = action[batch]  # .view(-1, 1)
     # only the activations for the selected action are kept
     x_a1 = node_embeds.gather(-1, a_expanded).squeeze(-1)
 
@@ -199,15 +214,18 @@ def sample_node_then_action(
     a1_mask: Tensor,
     batch: Tensor,
     eval_action: Optional[Tensor] = None,
+    deterministic: bool = False,
 ):
-    a1, pa1, data_starts, entropy1 = sample_node(node_embeds, a0_mask, batch)
+    a1, pa1, data_starts, entropy1 = sample_node(
+        node_embeds, a0_mask, batch, deterministic
+    )
     if eval_action is not None:
         a1 = eval_action[:, 1].long().view(-1, 1)
     a1_p = segmented_gather(pa1, a1, data_starts)  # probabilities of the selected nodes
 
     # batch = self._propagate_choice(batch,a1,data_starts)
     a2, pa2, _, entropy2 = sample_action_given_node(
-        node_action_embeds, a1, a1_mask, batch
+        node_action_embeds, a1, a1_mask, batch, deterministic
     )
     if eval_action is not None:
         a2 = eval_action[:, 0].long().view(-1, 1)
