@@ -1,18 +1,34 @@
 from typing import Tuple, Type, Union
 
 import torch as th
-from stable_baselines3.common.utils import get_device
 from torch import nn
 
 
+def get_device(device: Union[th.device, str] = "auto") -> th.device:
+    """
+    From stable-baselines3.
+    Retrieve PyTorch device.
+    It checks that the requested device is available first.
+    For now, it supports only cpu and cuda.
+    By default, it tries to use the gpu.
+
+    :param device: One for 'auto', 'cuda', 'cpu'
+    :return: Supported Pytorch device
+    """
+    # Cuda by default
+    if device == "auto":
+        device = "cuda"
+    # Force conversion to th.device
+    device = th.device(device)
+
+    # Cuda not available
+    if device.type == th.device("cuda").type and not th.cuda.is_available():
+        return th.device("cpu")
+
+    return device
+
+
 class GNNExtractor(nn.Module):
-    """
-    Feature extract that flatten the input.
-    Used as a placeholder when feature extraction is not needed.
-
-    :param observation_space:
-    """
-
     def __init__(
         self,
         gnn_class,
@@ -34,7 +50,7 @@ class GNNExtractor(nn.Module):
         )
         device = get_device(device)
 
-    def forward(  
+    def forward(
         self,
         node_features: th.Tensor,
         global_features: th.Tensor,

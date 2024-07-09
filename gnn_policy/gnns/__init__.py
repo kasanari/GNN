@@ -3,7 +3,7 @@ from .graph_net_geometric import TGMessagePassing
 from .graph_net_local import LocalMultiMessagePassing
 
 __all__ = [
-	"MultiMessagePassing",
-	"TGMessagePassing",
-	"LocalMultiMessagePassing",
+    "MultiMessagePassing",
+    "TGMessagePassing",
+    "LocalMultiMessagePassing",
 ]

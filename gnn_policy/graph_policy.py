@@ -6,18 +6,28 @@ import gymnasium as gym
 import numpy as np
 import torch as th
 from stable_baselines3.common.distributions import (
-    BernoulliDistribution, CategoricalDistribution, DiagGaussianDistribution,
-    MultiCategoricalDistribution, StateDependentNoiseDistribution,
-    make_proba_distribution)
+    BernoulliDistribution,
+    CategoricalDistribution,
+    DiagGaussianDistribution,
+    MultiCategoricalDistribution,
+    StateDependentNoiseDistribution,
+    make_proba_distribution,
+)
 from stable_baselines3.common.policies import BasePolicy
-from stable_baselines3.common.torch_layers import (BaseFeaturesExtractor,
-                                                   FlattenExtractor)
+from stable_baselines3.common.torch_layers import (
+    BaseFeaturesExtractor,
+    FlattenExtractor,
+)
 from stable_baselines3.common.type_aliases import Schedule
 from torch import Tensor, nn
 
-from .functional import (sample_action_and_node, sample_action_then_node,
-                         sample_node, sample_node_then_action,
-                         segmented_gather)
+from .functional import (
+    sample_action_and_node,
+    sample_action_then_node,
+    sample_node,
+    sample_node_then_action,
+    segmented_gather,
+)
 from .gnn_extractor import GNNExtractor
 from .gnns import MultiMessagePassing
 from .node_extractor import NodeExtractor
@@ -110,13 +120,15 @@ class GNNPolicy(BasePolicy):
         action_mode = kwargs.pop("action_mode")
 
         self.features_extractor = features_extractor_class(
-            self.observation_space, self.observation_space['nodes'].shape[-1], **self.features_extractor_kwargs
-        ) #TODO
+            self.observation_space,
+            self.observation_space["nodes"].shape[-1],
+            **self.features_extractor_kwargs,
+        )  # TODO
         self.features_dim = self.features_extractor.features_dim
         self.edge_dim = 1
 
         self.create_masks = mask_func
-        self.collate = batch_func    
+        self.collate = batch_func
 
         self.log_std_init = log_std_init
         dist_kwargs = None
@@ -271,7 +283,7 @@ class GNNPolicy(BasePolicy):
             module_gains = {
                 self.features_extractor: np.sqrt(2),
                 self.gnn_extractor: np.sqrt(2),
-                #self.vf_gnn_extractor: np.sqrt(2),
+                # self.vf_gnn_extractor: np.sqrt(2),
                 self.action_net: 0.01,
                 self.action_net2: 0.01,
                 self.value_net: 1,
@@ -295,7 +307,7 @@ class GNNPolicy(BasePolicy):
         :return: action, value and log probability of the action
         """
         node_embeds, graph_embeds, batch_idx, vf_embed = self._get_latent(obs)
-        
+
         values = self.value_net(vf_embed)
 
         # Evaluate the values for the given observations
@@ -304,7 +316,9 @@ class GNNPolicy(BasePolicy):
         )
         return actions, values, log_prob
 
-    def _get_latent(self, obs: Dict[str, Tensor]) -> Tuple[th.Tensor, th.Tensor, th.Tensor, th.Tensor]:
+    def _get_latent(
+        self, obs: Dict[str, Tensor]
+    ) -> Tuple[th.Tensor, th.Tensor, th.Tensor, th.Tensor]:
         """
         Get the latent code (i.e., activations of the last layer of each network)
         for the different networks.
@@ -315,7 +329,7 @@ class GNNPolicy(BasePolicy):
         """
 
         nodes, edge_index, edge_attr, batch_idx, num_graphs = self.collate(obs)
-        
+
         latent_nodes = self.features_extractor(nodes)
 
         latent_global = th.zeros(
@@ -330,17 +344,19 @@ class GNNPolicy(BasePolicy):
             batch_idx,
         )
 
-        latent_vf = self.vf_gnn_extractor(
-            latent_nodes,
-            latent_global,
-            edge_attr,
-            edge_index,
-            batch_idx,
-        )[1] if self.separate_actor_critic else latent_global
+        latent_vf = (
+            self.vf_gnn_extractor(
+                latent_nodes,
+                latent_global,
+                edge_attr,
+                edge_index,
+                batch_idx,
+            )[1]
+            if self.separate_actor_critic
+            else latent_global
+        )
 
         return latent_nodes, latent_global, batch_idx, latent_vf
-    
-
 
     def _get_action_from_latent(
         self,
@@ -363,7 +379,6 @@ class GNNPolicy(BasePolicy):
         # mean_actions = self.action_net(latent_pi)
 
         action_mask, node_mask = self.create_masks(obs)
-
 
         if isinstance(self.action_dist, MultiCategoricalDistribution):
             return self.action_func(
@@ -391,7 +406,7 @@ class GNNPolicy(BasePolicy):
             return a1, tot_log_prob, entropy
         else:
             raise ValueError("Invalid action distribution")
-        
+
     def _get_constructor_parameters(self) -> Dict[str, Any]:
         base = super()._get_constructor_parameters()
         added = {
@@ -400,7 +415,6 @@ class GNNPolicy(BasePolicy):
             "features_extractor_kwargs": {
                 "features_dim": self.emb_size,
                 "gnn_steps": self.gnn_steps,
-                "use_embeddings": self.use_embeddings,
             },
         }
         return {**base, **added}
@@ -451,7 +465,9 @@ class GNNPolicy(BasePolicy):
         :return: Taken action according to the policy
         """
         latent_nodes, latent_global, batch_idx, _ = self._get_latent(obs)
-        actions, log_prob, entropy = self._get_action_from_latent(obs, latent_nodes, latent_global, batch_idx)
+        actions, log_prob, entropy = self._get_action_from_latent(
+            obs, latent_nodes, latent_global, batch_idx
+        )
         return actions
 
     # REQUIRED FOR ON-POLICY ALGORITHMS (in SB3)
@@ -475,6 +491,8 @@ class GNNPolicy(BasePolicy):
         """
 
         latent_nodes, latent_global, batch_idx, vf_embed = self._get_latent(obs)
-        _, log_prob, entropy = self._get_action_from_latent(obs, latent_nodes, latent_global, batch_idx, eval_action=actions)
+        _, log_prob, entropy = self._get_action_from_latent(
+            obs, latent_nodes, latent_global, batch_idx, eval_action=actions
+        )
         values = self.value_net(vf_embed)
         return values, log_prob, entropy

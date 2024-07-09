@@ -6,6 +6,7 @@ from torch_geometric.nn import MessagePassing
 from torch_geometric.nn.aggr import AttentionalAggregation
 from torch_geometric.nn.models import GIN
 
+
 def _recurse(gnns, x, edge_index):
     if len(gnns) == 1:
         y = gnns[0](x, edge_index)
@@ -15,11 +16,15 @@ def _recurse(gnns, x, edge_index):
         y = gnns[0](z, edge_index)
         return history + [y], y
 
+
 def _recurse_global(pools, x_global, x, batch_ind):
     if len(pools) == 1:
         return pools[0](x_global, x[-1], batch_ind)
     else:
-        return pools[0](_recurse_global(pools[1:], x_global, x[:1], batch_ind), x[-1], batch_ind)
+        return pools[0](
+            _recurse_global(pools[1:], x_global, x[:1], batch_ind), x[-1], batch_ind
+        )
+
 
 # ----------------------------------------------------------------------------------------
 class TGMessagePassing(Module):
@@ -38,8 +43,13 @@ class TGMessagePassing(Module):
         # if node_in_size is None:
         #     node_in_size = [EMB_SIZE] * size
 
-        self.gnn = GIN(in_channels=node_in_size, hidden_channels=agg_size, num_layers=steps, train_eps=True)
-        #self.gnn = GAT(in_channels=node_in_size, hidden_channels=agg_size, num_layers=steps, v2=True)
+        self.gnn = GIN(
+            in_channels=node_in_size,
+            hidden_channels=agg_size,
+            num_layers=steps,
+            train_eps=True,
+        )
+        # self.gnn = GAT(in_channels=node_in_size, hidden_channels=agg_size, num_layers=steps, v2=True)
         self.pools = GlobalNode(node_out_size, global_size, activation_fn)
 
         self.steps = steps
@@ -62,7 +72,7 @@ class GlobalNode(Module):
 
     def forward(self, x, batch):
         xg = self.glob(x, batch)
-        #xg = torch.cat([xg, xg_old], dim=1)
+        # xg = torch.cat([xg, xg_old], dim=1)
         xg = self.tranform(xg) + xg  # skip connection
 
         return xg
@@ -74,7 +84,9 @@ class GraphNet(MessagePassing):
         super().__init__(aggr="max")
 
         self.f_mess = Sequential(Linear(node_in_size, agg_size), activation_fn())
-        self.f_agg = Sequential(Linear(node_in_size + agg_size, node_out_size), activation_fn())
+        self.f_agg = Sequential(
+            Linear(node_in_size + agg_size, node_out_size), activation_fn()
+        )
 
     def forward(self, x, edge_attr, edge_index):
         return self.propagate(edge_index, x=x, edge_attr=edge_attr)
