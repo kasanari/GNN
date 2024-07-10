@@ -332,25 +332,19 @@ class GNNPolicy(BasePolicy):
 
         latent_nodes = self.features_extractor(nodes)
 
-        latent_global = th.zeros(
-            (num_graphs, self.emb_size), dtype=th.float32, device=latent_nodes.device
-        )
-
         latent_nodes, latent_global = self.gnn_extractor(
             latent_nodes,
-            latent_global,
-            edge_attr,
             edge_index,
             batch_idx,
+            num_graphs
         )
 
         latent_vf = (
             self.vf_gnn_extractor(
                 latent_nodes,
-                latent_global,
-                edge_attr,
                 edge_index,
                 batch_idx,
+                num_graphs
             )[1]
             if self.separate_actor_critic
             else latent_global

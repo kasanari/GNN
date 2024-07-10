@@ -88,12 +88,14 @@ class LocalMultiMessagePassing(Module):
                 for i in range(steps)
             ]
         )
+        self.hidden_size = node_out_size
 
         self.steps = steps
 
-    def forward(self, x, x_global, edge_attr, edge_index, batch_ind, num_graphs):
+    def forward(self, x, edge_index, batch_ind, num_graphs):
+        x_global = torch.zeros(num_graphs, self.hidden_size).to(x.device)
         for i in range(self.steps):
-            x = self.gnns[i](x, edge_attr, edge_index)
+            x = self.gnns[i](x, edge_index)
             x_global = self.pools[i](x_global, x, batch_ind)
 
         return x, x_global
@@ -131,10 +133,10 @@ class GraphNet(MessagePassing):
             Linear(node_in_size + agg_size, node_out_size), activation_fn()
         )
 
-    def forward(self, x, edge_attr, edge_index):
-        return self.propagate(edge_index, x=x, edge_attr=edge_attr)
+    def forward(self, x, edge_index):
+        return self.propagate(edge_index, x=x)
 
-    def message(self, x_j, edge_attr):
+    def message(self, x_j):
         # z = torch.cat([x_j, edge_attr], dim=1)
         z = self.f_mess(x_j)
 
