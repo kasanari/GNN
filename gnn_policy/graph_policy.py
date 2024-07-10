@@ -122,6 +122,7 @@ class GNNPolicy(BasePolicy):
         self.features_extractor = features_extractor_class(
             self.observation_space,
             self.observation_space["nodes"].shape[-1],
+            activation_fn=activation_fn,
             **self.features_extractor_kwargs,
         )  # TODO
         self.features_dim = self.features_extractor.features_dim
@@ -330,10 +331,10 @@ class GNNPolicy(BasePolicy):
 
         nodes, edge_index, edge_attr, batch_idx, num_graphs = self.collate(obs)
 
-        latent_nodes = self.features_extractor(nodes)
+        node_embed = self.features_extractor(nodes)
 
         latent_nodes, latent_global = self.gnn_extractor(
-            latent_nodes,
+            node_embed,
             edge_index,
             batch_idx,
             num_graphs
@@ -341,7 +342,7 @@ class GNNPolicy(BasePolicy):
 
         latent_vf = (
             self.vf_gnn_extractor(
-                latent_nodes,
+                node_embed,
                 edge_index,
                 batch_idx,
                 num_graphs
