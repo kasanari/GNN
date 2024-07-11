@@ -1,5 +1,6 @@
-import gnn_policy.functional as F
 import torch as th
+
+import gnn_policy.functional as F
 
 
 def data_splits_and_starts():
