@@ -6,22 +6,15 @@ import gymnasium as gym
 import numpy as np
 import torch as th
 from stable_baselines3.common.distributions import (
-    BernoulliDistribution,
-    CategoricalDistribution,
-    MultiCategoricalDistribution,
-    make_proba_distribution,
-)
+    BernoulliDistribution, CategoricalDistribution,
+    MultiCategoricalDistribution, make_proba_distribution)
 from stable_baselines3.common.policies import BasePolicy
 from stable_baselines3.common.type_aliases import Schedule
 from torch import Tensor, nn
 
-from .functional import (
-    sample_action_and_node,
-    sample_action_then_node,
-    sample_node,
-    sample_node_then_action,
-    segmented_gather,
-)
+from .functional import (sample_action_and_node, sample_action_then_node,
+                         sample_node, sample_node_then_action,
+                         segmented_gather)
 
 
 class GNNPolicy(BasePolicy):
@@ -149,6 +142,8 @@ class GNNPolicy(BasePolicy):
             for module, gain in module_gains.items():
                 module.apply(partial(self.init_weights, gain=gain))
 
+        self.activation_fn = activation_fn
+        self.ortho_init = ortho_init
         self.value_net: nn.Linear = value_net
         self.action_net: nn.Linear = action_net
         self.action_net2: nn.Linear = action_net2
@@ -169,8 +164,6 @@ class GNNPolicy(BasePolicy):
 
     def _get_data(self) -> Dict[str, Any]:
         data = super(BasePolicy)._get_data()
-
-        default_none_kwargs = self.dist_kwargs or collections.defaultdict(lambda: None)
 
         data.update(
             dict(
@@ -237,7 +230,6 @@ class GNNPolicy(BasePolicy):
         node_latent: Tensor,
         graph_latent: Tensor,
         batch_idx: Tensor,
-        latent_sde: Optional[th.Tensor] = None,
         deterministic: bool = False,
         eval_action=None,
     ):
@@ -261,6 +253,7 @@ class GNNPolicy(BasePolicy):
                 node_mask,
                 batch_idx,
                 eval_action,
+                deterministic=deterministic,
             )
 
         elif isinstance(self.action_dist, CategoricalDistribution):
@@ -295,12 +288,13 @@ class GNNPolicy(BasePolicy):
         node_mask,
         batch,
         eval_action=None,
+        deterministic=False,
     ):
         x1 = self.action_net(node_latent)
         x2 = self.action_net2(node_latent)
         # note that the action_masks are reversed here, since we now pick the node first
         return sample_node_then_action(
-            x1, x2, node_mask, action_mask, batch, eval_action
+            x1, x2, node_mask, action_mask, batch, eval_action, deterministic=deterministic
         )
 
     def _sample_action_and_node(
