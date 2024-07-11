@@ -47,7 +47,7 @@ def segmented_argmax(probs, splits: List[int]):
     probs_split = th.split(probs, splits)
     samples = [th.argmax(x.squeeze(-1), dim=-1) for x in probs_split]
 
-    return th.atleast_2d(th.stack(samples))
+    return th.stack(samples)
 
 
 @th.jit.script
@@ -152,6 +152,13 @@ def sample_node_given_action(
 
     return sample_node(x_a1, mask, batch)
 
+@th.jit.script
+def concat_actions(predicate_action, object_action):
+    if predicate_action.dim() == 1:
+        predicate_action = predicate_action.view(-1, 1)
+    if object_action.dim() == 1:
+        object_action = object_action.view(-1, 1)
+    return th.cat((predicate_action, object_action), dim=-1)
 
 @th.jit.script
 def sample_action_and_node(
@@ -176,7 +183,7 @@ def sample_action_and_node(
     tot_log_prob = th.log(a1_p * a2_p).squeeze(-1)
     tot_entropy = entropy1 + entropy2  # H(X, Y) = H(X) + H(Y|X)
 
-    return th.cat((a1, a2), dim=-1), tot_log_prob, tot_entropy
+    return concat_actions(predicate_action=a1, object_action=a2), tot_log_prob, tot_entropy
 
 
 @th.jit.script
@@ -203,7 +210,7 @@ def sample_action_then_node(
     tot_log_prob = th.log(a1_p * a2_p).squeeze(-1)
     tot_entropy = entropy1 + entropy2  # H(X, Y) = H(X) + H(Y|X)
 
-    return th.cat((a1, a2), dim=-1), tot_log_prob, tot_entropy
+    return concat_actions(predicate_action=a1, object_action=a2), tot_log_prob, tot_entropy
 
 
 @th.jit.script
@@ -235,7 +242,7 @@ def sample_node_then_action(
     tot_entropy = entropy1 + entropy2  # H(X, Y) = H(X) + H(Y|X)
 
     return (
-        th.cat((a2, a1), dim=-1),
+        concat_actions(predicate_action=a2, object_action=a1),
         tot_log_prob,
         tot_entropy,
     )
