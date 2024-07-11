@@ -44,7 +44,6 @@ class GNNExtractor(nn.Module):
             node_out_size=emb_size,
             agg_size=emb_size,
             global_size=emb_size,
-            edge_size=edge_dim,
             steps=steps,
             activation_fn=activation_fn,
         )
@@ -53,11 +52,10 @@ class GNNExtractor(nn.Module):
     def forward(
         self,
         node_features: th.Tensor,
-        global_features: th.Tensor,
-        edge_features: th.Tensor,
         edge_indices: th.Tensor,
         batch_ind: th.Tensor,
+        num_graphs: int,
     ) -> Tuple[th.Tensor, th.Tensor]:
         return self.gnn(
-            node_features, global_features, edge_features, edge_indices, batch_ind, 1
+            node_features, edge_indices, batch_ind, num_graphs
         )
