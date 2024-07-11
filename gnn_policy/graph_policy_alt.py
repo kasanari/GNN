@@ -8,16 +8,10 @@ import torch as th
 from stable_baselines3.common.distributions import (
     BernoulliDistribution,
     CategoricalDistribution,
-    DiagGaussianDistribution,
     MultiCategoricalDistribution,
-    StateDependentNoiseDistribution,
     make_proba_distribution,
 )
 from stable_baselines3.common.policies import BasePolicy
-from stable_baselines3.common.torch_layers import (
-    BaseFeaturesExtractor,
-    FlattenExtractor,
-)
 from stable_baselines3.common.type_aliases import Schedule
 from torch import Tensor, nn
 
@@ -28,9 +22,6 @@ from .functional import (
     sample_node_then_action,
     segmented_gather,
 )
-from .gnn_extractor import GNNExtractor
-from .gnns import MultiMessagePassing
-from .node_extractor import NodeExtractor
 
 
 class GNNPolicy(BasePolicy):
