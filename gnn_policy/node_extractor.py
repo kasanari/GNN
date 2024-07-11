@@ -18,8 +18,8 @@ class NodeExtractor(BaseFeaturesExtractor):
         self,
         observation_space: gym.Space,
         node_dim: int,
-        features_dim: int = 32,
-        activation_fn: Type[nn.Module] = nn.Tanh,
+        features_dim: int,
+        activation_fn: Type[nn.Module],
     ):
         super(NodeExtractor, self).__init__(
             observation_space,
