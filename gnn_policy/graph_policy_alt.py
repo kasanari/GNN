@@ -44,23 +44,9 @@ class GNNPolicy(BasePolicy):
     :param net_arch: The specification of the policy and value networks.
     :param activation_fn: Activation function
     :param ortho_init: Whether to use or not orthogonal initialization
-    :param use_sde: Whether to use State Dependent Exploration or not
-    :param log_std_init: Initial value for the log standard deviation
-    :param full_std: Whether to use (n_features x n_actions) parameters
-        for the std instead of only (n_features,) when using gSDE
-    :param sde_net_arch: Network architecture for extracting features
-        when using gSDE. If None, the latent features from the policy will be used.
-        Pass an empty list to use the states as features.
-    :param use_expln: Use ``expln()`` function instead of ``exp()`` to ensure
-        a positive standard deviation (cf paper). It allows to keep variance
-        above zero and prevent it from growing too fast. In practice, ``exp()`` is usually enough.
-    :param squash_output: Whether to squash the output using a tanh function,
-        this allows to ensure boundaries when using gSDE.
     :param features_extractor_class: Features extractor to use.
     :param features_extractor_kwargs: Keyword arguments
         to pass to the features extractor.
-    :param normalize_images: Whether to normalize images or not,
-         dividing by 255.0 (True by default)
     :param optimizer_class: The optimizer to use,
         ``th.optim.Adam`` by default
     :param optimizer_kwargs: Additional keyword arguments,
@@ -74,15 +60,13 @@ class GNNPolicy(BasePolicy):
         lr_schedule: Schedule,
         mask_func,
         batch_func,
-        activation_fn: Type[nn.Module] = nn.LeakyReLU,
+        activation_fn: Type[nn.Module],
         ortho_init: bool = True,
-        features_extractor_class: Type[BaseFeaturesExtractor] = NodeExtractor,
         features_extractor_kwargs: Optional[Dict[str, Any]] = None,
         optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
         optimizer_kwargs: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
-
         super(GNNPolicy, self).__init__(
             observation_space,
             action_space,
@@ -90,38 +74,107 @@ class GNNPolicy(BasePolicy):
             optimizer_kwargs=optimizer_kwargs,
         )
 
-        self.activation_fn = activation_fn
-        self.ortho_init = ortho_init
-        self.gnn_steps = kwargs.pop("gnn_steps")
-        self.emb_size = (
-            features_extractor_kwargs.get("features_dim", 32)
-            if features_extractor_kwargs
-            else 32
+        optimizer_kwargs = optimizer_kwargs or {}
+        separate_actor_critic = kwargs.pop("separate_actor_critic")
+        activation_fn = activation_fn
+        ortho_init = ortho_init
+        gnn_steps = kwargs.pop("gnn_steps")  # message passing steps
+        emb_size = features_extractor_kwargs.pop("features_dim")
+        action_mode = kwargs.pop("action_mode")  # action order
+        gnn_class = kwargs.pop("gnn_class")
+        input_size = observation_space["nodes"].shape[-1]
+        action_dist = make_proba_distribution(action_space)
+        num_actions = action_space.nvec[0]
+
+        gnn_extractor = gnn_class(
+            gnn_steps,
+            input_size,
+            emb_size,
+            emb_size,
+            emb_size,
+            activation_fn=activation_fn,
         )
 
-        self.separate_actor_critic = kwargs.pop("separate_actor_critic")
+        vf_gnn_extractor = (
+            gnn_class(
+                gnn_steps,
+                input_size,
+                emb_size,
+                emb_size,
+                emb_size,
+                activation_fn=activation_fn,
+            )
+            if separate_actor_critic
+            else None
+        )
 
-        action_mode = kwargs.pop("action_mode")
+        action_funcs = {
+            "node_then_action": (
+                self._sample_node_then_action,
+                lambda: nn.Linear(emb_size, 1),
+                lambda: nn.Linear(emb_size, num_actions),
+            ),
+            "action_then_node": (
+                self._sample_action_then_node,
+                lambda: nn.Linear(emb_size, num_actions),
+                lambda: nn.Linear(emb_size, 1),
+            ),
+            "independent": (
+                self._sample_action_and_node,
+                lambda: nn.Linear(emb_size, num_actions),
+                lambda: nn.Linear(emb_size, 1),
+            ),
+        }
+        value_net = nn.Sequential(nn.Linear(emb_size, 1))
 
-        self.features_extractor = features_extractor_class(
-            self.observation_space,
-            self.observation_space["nodes"].shape[-1],
-            features_dim=self.emb_size,
-            activation_fn=self.activation_fn,
-        )  # TODO
-        self.features_dim = self.features_extractor.features_dim
-        self.edge_dim = 1
+        if isinstance(action_space, gym.spaces.MultiDiscrete):
+            action_func, nn0, nn1 = action_funcs[action_mode]
+            action_net = nn0()
+            action_net2 = nn1()
+        elif isinstance(action_dist, CategoricalDistribution):
+            action_net = nn.Linear(emb_size, 1)
+            action_net2 = None
+        elif isinstance(action_dist, MultiCategoricalDistribution):
+            action_net = action_dist.proba_distribution_net(latent_dim=emb_size)
+            action_net2 = None
+        elif isinstance(action_dist, BernoulliDistribution):
+            action_net = action_dist.proba_distribution_net(latent_dim=emb_size)
+            action_net2 = None
+        else:
+            raise NotImplementedError(f"Unsupported distribution '{self.action_dist}'.")
 
+        # Init weights: use orthogonal initialization
+        # with small initial weight for the output
+        if ortho_init:
+            module_gains = {
+                gnn_extractor: np.sqrt(2),
+                action_net: 0.01,
+                action_net2: 0.01,
+                value_net: 0.01,
+            }
+            if separate_actor_critic:
+                module_gains[vf_gnn_extractor] = np.sqrt(2)
+
+            for module, gain in module_gains.items():
+                module.apply(partial(self.init_weights, gain=gain))
+
+        self.value_net: nn.Linear = value_net
+        self.action_net: nn.Linear = action_net
+        self.action_net2: nn.Linear = action_net2
+        self.gnn_extractor: nn.Module = gnn_extractor
+        self.vf_gnn_extractor: nn.Module = vf_gnn_extractor
+        self.action_dist = action_dist
+        self.action_func = action_func
+        self.input_size = input_size
         self.create_masks = mask_func
         self.collate = batch_func
-
         self.action_order = action_mode
-        self.gnn_class = kwargs.pop("gnn_class")
+        self.separate_actor_critic = separate_actor_critic
 
-        # Action distribution
-        self.action_dist = make_proba_distribution(action_space)
-
-        self._build(self.gnn_class, action_mode, lr_schedule)
+        # Setup optimizer with initial learning rate
+        self.optimizer = optimizer_class(
+            self.parameters(), lr=lr_schedule(1), **optimizer_kwargs
+        )
 
     def _get_data(self) -> Dict[str, Any]:
         data = super(BasePolicy)._get_data()
@@ -131,10 +184,6 @@ class GNNPolicy(BasePolicy):
         data.update(
             dict(
                 activation_fn=self.activation_fn,
-                squash_output=default_none_kwargs["squash_output"],
-                full_std=default_none_kwargs["full_std"],
-                sde_net_arch=default_none_kwargs["sde_net_arch"],
-                use_expln=default_none_kwargs["use_expln"],
                 lr_schedule=self._dummy_schedule,  # dummy lr schedule, not needed for loading policy alone
                 ortho_init=self.ortho_init,
                 optimizer_class=self.optimizer_class,
@@ -145,104 +194,8 @@ class GNNPolicy(BasePolicy):
         )
         return data
 
-    def reset_noise(self, n_envs: int = 1) -> None:
-        """
-        Sample new weights for the exploration matrix.
-
-        :param n_envs:
-        """
-        assert isinstance(
-            self.action_dist, StateDependentNoiseDistribution
-        ), "reset_noise() is only available when using gSDE"
-        self.action_dist.sample_weights(self.log_std, batch_size=n_envs)
-
-    def _build(self, gnn_class, action_mode, lr_schedule: Schedule) -> None:
-        """
-        Create the networks and the optimizer.
-
-        :param lr_schedule: Learning rate schedule
-            lr_schedule(1) is the initial learning rate
-        """
-
-        self.gnn_extractor = GNNExtractor(
-            gnn_class,
-            self.emb_size,
-            edge_dim=self.edge_dim,
-            activation_fn=self.activation_fn,
-            device=self.device,
-            steps=self.gnn_steps,
-        )
-
-        if self.separate_actor_critic:
-            self.vf_gnn_extractor = GNNExtractor(
-                gnn_class,
-                self.emb_size,
-                edge_dim=self.edge_dim,
-                activation_fn=self.activation_fn,
-                device=self.device,
-                steps=self.gnn_steps,
-            )
-
-        emb_size = self.emb_size
-        latent_dim_pi = emb_size
-
-        self.action_net: nn.Module
-        self.action_net2: nn.Module
-        if isinstance(self.action_space, gym.spaces.MultiDiscrete):
-            num_actions = self.action_space.nvec[0]
-            if action_mode == "action_then_node":
-                self.action_func = self._sample_action_then_node
-                self.action_net = nn.Linear(emb_size, num_actions)
-                self.action_net2 = nn.Linear(emb_size, num_actions)
-            elif action_mode == "node_then_action":
-                self.action_func = self._sample_node_then_action
-                self.action_net = nn.Linear(emb_size, 1)
-                self.action_net2 = nn.Linear(emb_size, num_actions)
-            elif action_mode == "independent":
-                self.action_func = self._sample_action_and_node
-                self.action_net = nn.Linear(emb_size, num_actions)
-                self.action_net2 = nn.Linear(emb_size, 1)
-
-        elif isinstance(self.action_dist, CategoricalDistribution):
-            self.action_net = nn.Linear(emb_size, 1)
-
-        elif isinstance(self.action_dist, DiagGaussianDistribution):
-            self.action_net, self.log_std = self.action_dist.proba_distribution_net(
-                latent_dim=latent_dim_pi, log_std_init=self.log_std_init
-            )
-        elif isinstance(self.action_dist, MultiCategoricalDistribution):
-            self.action_net = self.action_dist.proba_distribution_net(
-                latent_dim=latent_dim_pi
-            )
-        elif isinstance(self.action_dist, BernoulliDistribution):
-            self.action_net = self.action_dist.proba_distribution_net(
-                latent_dim=latent_dim_pi
-            )
-        else:
-            raise NotImplementedError(f"Unsupported distribution '{self.action_dist}'.")
-
-        self.value_net = nn.Linear(emb_size, 1)
-        # Init weights: use orthogonal initialization
-        # with small initial weight for the output
-        if self.ortho_init:
-            module_gains = {
-                self.features_extractor: np.sqrt(2),
-                self.gnn_extractor: np.sqrt(2),
-                # self.vf_gnn_extractor: np.sqrt(2),
-                self.action_net: 0.01,
-                self.action_net2: 0.01,
-                self.value_net: 1,
-            }
-            for module, gain in module_gains.items():
-                module.apply(partial(self.init_weights, gain=gain))
-
-        # Setup optimizer with initial learning rate
-        self.optimizer = self.optimizer_class(
-            self.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs
-        )
-
     def forward(
-        self, obs: Dict, deterministic: bool = False, action_masks=None
+        self, obs: Dict, deterministic: bool = False
     ) -> Tuple[th.Tensor, th.Tensor, th.Tensor]:
         """
         Forward pass in all the networks (actor and critic)
@@ -253,9 +206,9 @@ class GNNPolicy(BasePolicy):
         """
         node_embeds, graph_embeds, batch_idx, vf_embed = self._get_latent(obs)
 
+        # Value function
         values = self.value_net(vf_embed)
 
-        # Evaluate the values for the given observations
         actions, log_prob, _ = self._get_action_from_latent(
             obs, node_embeds, graph_embeds, batch_idx, deterministic=deterministic
         )
@@ -275,14 +228,12 @@ class GNNPolicy(BasePolicy):
 
         nodes, edge_index, edge_attr, batch_idx, num_graphs = self.collate(obs)
 
-        latent_nodes = self.features_extractor(nodes)
-
         latent_nodes, latent_global = self.gnn_extractor(
-            latent_nodes, edge_index, batch_idx, num_graphs
+            nodes, edge_index, batch_idx, num_graphs
         )
 
         latent_vf = (
-            self.vf_gnn_extractor(latent_nodes, edge_index, batch_idx, num_graphs)[1]
+            self.vf_gnn_extractor(nodes, edge_index, batch_idx, num_graphs)[1]
             if self.separate_actor_critic
             else latent_global
         )
@@ -328,11 +279,6 @@ class GNNPolicy(BasePolicy):
                 a1 = eval_action.long()
 
             tot_log_prob = th.log(segmented_gather(pa1, a1, data_starts))
-
-            # # convert the actions to tuples
-            # a1 = a1.cpu().numpy()
-            # a2 = a2.cpu().numpy()
-            # a = list(zip(a1, a2))
 
             return a1, tot_log_prob, entropy
         else:
@@ -397,7 +343,7 @@ class GNNPolicy(BasePolicy):
         """
         latent_nodes, latent_global, batch_idx, _ = self._get_latent(obs)
         actions, log_prob, entropy = self._get_action_from_latent(
-            obs, latent_nodes, latent_global, batch_idx
+            obs, latent_nodes, latent_global, batch_idx, deterministic=deterministic
         )
         return actions
 
