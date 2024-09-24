@@ -144,13 +144,15 @@ def sample_node_given_action(
     action: Tensor,  # type: ignore
     batch: Tensor,
     mask: Tensor,
+    deterministic: bool = False,
 ):
     # a single action is performed for each graph
     a_expanded = action[batch]  # .view(-1, 1)
     # only the activations for the selected action are kept
     x_a1 = node_embeds.gather(-1, a_expanded).squeeze(-1)
 
-    return sample_node(x_a1, mask, batch)
+    return sample_node(x_a1, mask, batch, deterministic)
+
 
 @th.jit.script
 def concat_actions(predicate_action, object_action):
@@ -159,6 +161,7 @@ def concat_actions(predicate_action, object_action):
     if object_action.dim() == 1:
         object_action = object_action.view(-1, 1)
     return th.cat((predicate_action, object_action), dim=-1)
+
 
 @th.jit.script
 def sample_action_and_node(
@@ -183,7 +186,11 @@ def sample_action_and_node(
     tot_log_prob = th.log(a1_p * a2_p).squeeze(-1)
     tot_entropy = entropy1 + entropy2  # H(X, Y) = H(X) + H(Y|X)
 
-    return concat_actions(predicate_action=a1, object_action=a2), tot_log_prob, tot_entropy
+    return (
+        concat_actions(predicate_action=a1, object_action=a2),
+        tot_log_prob,
+        tot_entropy,
+    )
 
 
 @th.jit.script
@@ -194,13 +201,14 @@ def sample_action_then_node(
     a1_mask: Tensor,
     batch: Tensor,
     eval_action: Optional[Tensor] = None,
+    deterministic: bool = False,
 ):
     a1, pa1, entropy1 = graph_action(graph_embeds, a0_mask)
     if eval_action is not None:
         a1 = eval_action[:, 0].long()
 
     a2, pa2, data_starts, entropy2 = sample_node_given_action(
-        node_embeds, a1, batch, a1_mask
+        node_embeds, a1, batch, a1_mask, deterministic=deterministic
     )
     if eval_action is not None:
         a2 = eval_action[:, 1].long()
@@ -210,7 +218,11 @@ def sample_action_then_node(
     tot_log_prob = th.log(a1_p * a2_p).squeeze(-1)
     tot_entropy = entropy1 + entropy2  # H(X, Y) = H(X) + H(Y|X)
 
-    return concat_actions(predicate_action=a1, object_action=a2), tot_log_prob, tot_entropy
+    return (
+        concat_actions(predicate_action=a1, object_action=a2),
+        tot_log_prob,
+        tot_entropy,
+    )
 
 
 @th.jit.script
