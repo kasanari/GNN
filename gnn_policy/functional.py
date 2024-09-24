@@ -267,7 +267,7 @@ def segmented_prod(tnsr: Tensor, splits: List[int]):
 @th.jit.script
 def sample_node_set(logits: th.Tensor, mask: th.Tensor, batch):
     data_splits, _ = data_splits_and_starts(batch)
-    a0_sel = logits.bernoulli().to(th.uint8)
+    a0_sel = logits.bernoulli().to(th.bool)
     af_selection = segmented_nonzero(a0_sel, data_splits)
 
     a0_prob = th.where(a0_sel, logits, 1 - logits)
