@@ -1,7 +1,6 @@
-import numpy as np
 import torch
-import torch_geometric
-from torch.nn import LeakyReLU, Linear, Module, ModuleList, Sequential
+from torch import Tensor
+from torch.nn import Linear, Module, ModuleList, Sequential
 from torch_geometric.nn import MessagePassing
 from torch_geometric.nn.aggr import AttentionalAggregation, MaxAggregation
 
@@ -25,14 +24,14 @@ from torch_geometric.nn.aggr import AttentionalAggregation, MaxAggregation
 class LocalMultiMessagePassing(Module):
     def __init__(
         self,
-        steps,
-        node_in_size,
-        node_out_size,
-        agg_size,
-        global_size,
-        activation_fn,
+        steps: int,
+        node_in_size: int,
+        node_out_size: int,
+        agg_size: int,
+        global_size: int,
+        activation_fn: Module,
     ):
-        super().__init__()
+        super(Module).__init__()
 
         # if node_in_size is None:
         #     node_in_size = [EMB_SIZE] * size
@@ -60,7 +59,9 @@ class LocalMultiMessagePassing(Module):
 
         self.steps = steps
 
-    def forward(self, x, edge_index, batch_ind, num_graphs):
+    def forward(
+        self, x: Tensor, edge_index: Tensor, batch_ind: Tensor, num_graphs: int
+    ):
         x_global = torch.zeros(num_graphs, self.hidden_size).to(x.device)
         for i in range(self.steps):
             x = self.gnns[i](x, edge_index)
@@ -72,8 +73,8 @@ class LocalMultiMessagePassing(Module):
 
 # ----------------------------------------------------------------------------------------
 class AttentionGlobalNode(Module):
-    def __init__(self, node_size, global_size, activation_fn):
-        super().__init__()
+    def __init__(self, node_size: int, global_size: int, activation_fn: Module):
+        super(Module).__init__()
 
         att_mask = Linear(node_size, 1)
         att_feat = Sequential(Linear(node_size, node_size), activation_fn())
@@ -83,7 +84,7 @@ class AttentionGlobalNode(Module):
             Linear(global_size * 2, global_size), activation_fn()
         )
 
-    def forward(self, xg_old, x, batch):
+    def forward(self, xg_old: Tensor, x: Tensor, batch: Tensor):
         xg = self.glob(x, batch)
 
         xg = torch.cat([xg, xg_old], dim=1)
@@ -93,13 +94,13 @@ class AttentionGlobalNode(Module):
 
 
 class MaxGlobalNode(Module):
-    def __init__(self, node_size, global_size, activation_fn):
-        super().__init__()
+    def __init__(self, node_size: int, global_size: int, activation_fn: Module):
+        super(Module).__init__()
 
         self.agg = MaxAggregation()
         self.combine = Sequential(Linear(global_size * 2, global_size), activation_fn())
 
-    def forward(self, xg_old, x, batch):
+    def forward(self, xg_old: Tensor, x: Tensor, batch: Tensor):
         xg = self.agg(x, batch)
         xg = torch.cat([xg, xg_old], dim=1)
         xg = self.combine(xg) + xg_old  # skip connection
@@ -110,7 +111,12 @@ class MaxGlobalNode(Module):
 # ----------------------------------------------------------------------------------------
 class GraphNet(MessagePassing):
     def __init__(
-        self, node_in_size, agg_size, node_out_size, activation_fn, skip=False
+        self,
+        node_in_size: int,
+        agg_size: int,
+        node_out_size: int,
+        activation_fn: Module,
+        skip: bool = False,
     ):
         super().__init__(aggr="max")
 
@@ -120,16 +126,16 @@ class GraphNet(MessagePassing):
         )
         self.skip = skip
 
-    def forward(self, x, edge_index):
+    def forward(self, x: Tensor, edge_index: Tensor):
         return self.propagate(edge_index, x=x)
 
-    def message(self, x_j):
+    def message(self, x_j: Tensor):
         # z = torch.cat([x_j, edge_attr], dim=1)
         z = x_j
 
         return z
 
-    def update(self, aggr_out, x):
+    def update(self, aggr_out: Tensor, x: Tensor):
         z = torch.cat([x, aggr_out], dim=1)
         z = self.combine(z) + x if self.skip else self.combine(z)  # skip connection
 
