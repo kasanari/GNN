@@ -6,18 +6,28 @@ import gymnasium as gym
 import numpy as np
 import torch as th
 from stable_baselines3.common.distributions import (
-    BernoulliDistribution, CategoricalDistribution, DiagGaussianDistribution,
-    MultiCategoricalDistribution, StateDependentNoiseDistribution,
-    make_proba_distribution)
+    BernoulliDistribution,
+    CategoricalDistribution,
+    DiagGaussianDistribution,
+    MultiCategoricalDistribution,
+    StateDependentNoiseDistribution,
+    make_proba_distribution,
+)
 from stable_baselines3.common.policies import BasePolicy
-from stable_baselines3.common.torch_layers import (BaseFeaturesExtractor,
-                                                   FlattenExtractor)
+from stable_baselines3.common.torch_layers import (
+    BaseFeaturesExtractor,
+    FlattenExtractor,
+)
 from stable_baselines3.common.type_aliases import Schedule
 from torch import Tensor, nn
 
-from .functional import (sample_action_and_node, sample_action_then_node,
-                         sample_node, sample_node_then_action,
-                         segmented_gather)
+from .functional import (
+    sample_action_and_node,
+    sample_action_then_node,
+    sample_node,
+    sample_node_then_action,
+    segmented_gather,
+)
 from .gnn_extractor import GNNExtractor
 from .gnns import MultiMessagePassing
 from .node_extractor import NodeExtractor
@@ -324,19 +334,11 @@ class GNNPolicy(BasePolicy):
         node_embed = self.features_extractor(nodes)
 
         latent_nodes, latent_global = self.gnn_extractor(
-            node_embed,
-            edge_index,
-            batch_idx,
-            num_graphs
+            node_embed, edge_index, batch_idx, num_graphs
         )
 
         latent_vf = (
-            self.vf_gnn_extractor(
-                node_embed,
-                edge_index,
-                batch_idx,
-                num_graphs
-            )[1]
+            self.vf_gnn_extractor(node_embed, edge_index, batch_idx, num_graphs)[1]
             if self.separate_actor_critic
             else latent_global
         )

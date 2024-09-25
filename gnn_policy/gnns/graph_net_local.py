@@ -5,7 +5,6 @@ from torch.nn import LeakyReLU, Linear, Module, ModuleList, Sequential
 from torch_geometric.nn import MessagePassing
 from torch_geometric.nn.aggr import AttentionalAggregation, MaxAggregation
 
-
 # def _recurse(gnns, x, edge_index, edge_attr):
 #     if len(gnns) == 1:
 #         y = gnns[0](x, edge_attr, edge_index)
@@ -92,6 +91,7 @@ class AttentionGlobalNode(Module):
 
         return xg
 
+
 class MaxGlobalNode(Module):
     def __init__(self, node_size, global_size, activation_fn):
         super().__init__()
@@ -105,7 +105,6 @@ class MaxGlobalNode(Module):
         xg = self.combine(xg) + xg_old  # skip connection
 
         return xg
-
 
 
 # ----------------------------------------------------------------------------------------

@@ -1,4 +1,3 @@
-
 import torch as th
 from torch import Tensor, nn
 from torch_geometric.utils import softmax
@@ -13,7 +12,9 @@ def get_start_indices(splits: Tensor) -> Tensor:
 
 
 @th.jit.script
-def masked_segmented_softmax(energies: Tensor, mask: Tensor, batch_ind: Tensor) -> Tensor:
+def masked_segmented_softmax(
+    energies: Tensor, mask: Tensor, batch_ind: Tensor
+) -> Tensor:
     infty = th.tensor(-1e9, device=energies.device)
     masked_energies = th.where(mask, energies, infty)
     probs = softmax(masked_energies, batch_ind)
@@ -49,7 +50,9 @@ def segmented_argmax(probs: Tensor, splits: list[int]) -> Tensor:
 
 
 @th.jit.script
-def segmented_scatter_(dest: Tensor, indices: Tensor, start_indices: Tensor, values: Tensor) -> Tensor:
+def segmented_scatter_(
+    dest: Tensor, indices: Tensor, start_indices: Tensor, values: Tensor
+) -> Tensor:
     real_indices = start_indices + indices
     dest[real_indices] = values
     return dest
@@ -275,7 +278,9 @@ def segmented_prod(tnsr: Tensor, splits: list[int]):
 
 
 @th.jit.script
-def sample_node_set(logits: Tensor, mask: Tensor, batch: Tensor) -> tuple[list[Tensor], Tensor]:
+def sample_node_set(
+    logits: Tensor, mask: Tensor, batch: Tensor
+) -> tuple[list[Tensor], Tensor]:
     data_splits, _ = data_splits_and_starts(batch)
     a0_sel = logits.bernoulli().to(th.bool)
     af_selection = segmented_nonzero(a0_sel, data_splits)

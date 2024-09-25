@@ -6,15 +6,22 @@ import gymnasium as gym
 import numpy as np
 import torch as th
 from stable_baselines3.common.distributions import (
-    BernoulliDistribution, CategoricalDistribution,
-    MultiCategoricalDistribution, make_proba_distribution)
+    BernoulliDistribution,
+    CategoricalDistribution,
+    MultiCategoricalDistribution,
+    make_proba_distribution,
+)
 from stable_baselines3.common.policies import BasePolicy
 from stable_baselines3.common.type_aliases import Schedule
 from torch import Tensor, nn
 
-from .functional import (sample_action_and_node, sample_action_then_node,
-                         sample_node, sample_node_then_action,
-                         segmented_gather)
+from .functional import (
+    sample_action_and_node,
+    sample_action_then_node,
+    sample_node,
+    sample_node_then_action,
+    segmented_gather,
+)
 
 
 class GNNPolicy(BasePolicy):
@@ -101,7 +108,7 @@ class GNNPolicy(BasePolicy):
             "action_then_node": (
                 self._sample_action_then_node,
                 lambda: nn.Linear(emb_size, num_actions),
-                lambda: nn.Linear(emb_size, 1),
+                lambda: nn.Linear(emb_size, num_actions),
             ),
             "independent": (
                 self._sample_action_and_node,
@@ -294,7 +301,13 @@ class GNNPolicy(BasePolicy):
         x2 = self.action_net2(node_latent)
         # note that the action_masks are reversed here, since we now pick the node first
         return sample_node_then_action(
-            x1, x2, node_mask, action_mask, batch, eval_action, deterministic=deterministic
+            x1,
+            x2,
+            node_mask,
+            action_mask,
+            batch,
+            eval_action,
+            deterministic=deterministic,
         )
 
     def _sample_action_and_node(
@@ -307,12 +320,25 @@ class GNNPolicy(BasePolicy):
         )
 
     def _sample_action_then_node(
-        self, node_latent, graph_latent, action_mask, node_mask, batch, eval_action=None
+        self,
+        node_latent,
+        graph_latent,
+        action_mask,
+        node_mask,
+        batch,
+        eval_action=None,
+        deterministic=False,
     ):
         x1 = self.action_net(graph_latent)
         x2 = self.action_net2(node_latent)
         return sample_action_then_node(
-            x1, x2, action_mask, node_mask, batch, eval_action
+            x1,
+            x2,
+            action_mask,
+            node_mask,
+            batch,
+            eval_action,
+            deterministic=deterministic,
         )
 
     # REQUIRED FOR ON-POLICY ALGORITHMS (in SB3)

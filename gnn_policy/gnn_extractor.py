@@ -56,6 +56,4 @@ class GNNExtractor(nn.Module):
         batch_ind: th.Tensor,
         num_graphs: int,
     ) -> Tuple[th.Tensor, th.Tensor]:
-        return self.gnn(
-            node_features, edge_indices, batch_ind, num_graphs
-        )
+        return self.gnn(node_features, edge_indices, batch_ind, num_graphs)
