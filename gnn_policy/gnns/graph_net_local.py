@@ -31,7 +31,7 @@ class LocalMultiMessagePassing(Module):
         global_size: int,
         activation_fn: Module,
     ):
-        super(Module).__init__()
+        super().__init__()
 
         # if node_in_size is None:
         #     node_in_size = [EMB_SIZE] * size
@@ -74,7 +74,7 @@ class LocalMultiMessagePassing(Module):
 # ----------------------------------------------------------------------------------------
 class AttentionGlobalNode(Module):
     def __init__(self, node_size: int, global_size: int, activation_fn: Module):
-        super(Module).__init__()
+        super().__init__()
 
         att_mask = Linear(node_size, 1)
         att_feat = Sequential(Linear(node_size, node_size), activation_fn())
@@ -95,7 +95,7 @@ class AttentionGlobalNode(Module):
 
 class MaxGlobalNode(Module):
     def __init__(self, node_size: int, global_size: int, activation_fn: Module):
-        super(Module).__init__()
+        super().__init__()
 
         self.agg = MaxAggregation()
         self.combine = Sequential(Linear(global_size * 2, global_size), activation_fn())
