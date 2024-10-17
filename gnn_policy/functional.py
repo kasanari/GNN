@@ -86,21 +86,23 @@ def sample_action(p: Tensor):
 
 
 @th.jit.script
-def entropy(p: Tensor, batch_size: int):
+def entropy(p: Tensor, batch_size: int) -> Tensor:
     log_probs = th.log(p + 1e-9)  # to avoid log(0)
     entropy = (-p * log_probs).sum() / batch_size
     return entropy
 
 
 @th.jit.script
-def masked_entropy(p: Tensor, mask: Tensor, batch_size: int):
+def masked_entropy(p: Tensor, mask: Tensor, batch_size: int) -> Tensor:
     """Zero probability elements are masked out"""
     unmasked_probs = p[mask]
     return entropy(unmasked_probs, batch_size)
 
 
 @th.jit.script
-def sample_node(x: Tensor, mask: Tensor, batch: Tensor, deterministic: bool = False):
+def sample_node(
+    x: Tensor, mask: Tensor, batch: Tensor, deterministic: bool = False
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     data_splits, data_starts = data_splits_and_starts(batch)
     p = masked_segmented_softmax(x, mask, batch)
     a = (
@@ -119,7 +121,7 @@ def sample_action_given_node(
     mask: Tensor,
     batch: Tensor,
     deterministic: bool = False,
-):
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     # only the activations for the selected nodes are kept.
     _, data_starts = data_splits_and_starts(batch)
     x = segmented_gather(node_embeds, node.squeeze(), data_starts)
@@ -146,7 +148,7 @@ def sample_node_given_action(
     batch: Tensor,
     mask: Tensor,
     deterministic: bool = False,
-):
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     # a single action is performed for each graph
     a_expanded = action[batch]  # .view(-1, 1)
     # only the activations for the selected action are kept
@@ -172,7 +174,7 @@ def sample_action_and_node(
     a1_mask: Tensor,
     batch: Tensor,
     eval_action: Tensor | None = None,
-):
+) -> tuple[Tensor, Tensor, Tensor]:
     a1, pa1, entropy1 = graph_action(graph_embeds, a0_mask)
     if eval_action is not None:
         a1 = eval_action[:, 0].long().view(-1, 1)
@@ -203,7 +205,7 @@ def sample_action_then_node(
     batch: Tensor,
     eval_action: Tensor | None = None,
     deterministic: bool = False,
-):
+) -> tuple[Tensor, Tensor, Tensor]:
     a1, pa1, entropy1 = graph_action(graph_embeds, a0_mask)
     if eval_action is not None:
         a1 = eval_action[:, 0].long()
@@ -235,7 +237,7 @@ def sample_node_then_action(
     batch: Tensor,
     eval_action: Tensor | None = None,
     deterministic: bool = False,
-):
+) -> tuple[Tensor, Tensor, Tensor]:
     a1, pa1, data_starts, entropy1 = sample_node(
         node_embeds, a0_mask, batch, deterministic
     )
