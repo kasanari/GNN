@@ -32,9 +32,9 @@ def masked_softmax(x: Tensor, mask: Tensor) -> Tensor:
 def segmented_sample(probs: Tensor, splits: list[int]) -> Tensor:
     probs_split = th.split(probs, splits)
     samples = [
-        th.randint(high=len(x.squeeze(-1)), size=(1,))
-        if x.squeeze(-1).sum() == 0 or x.squeeze(-1).sum().isnan()
-        else th.multinomial(x.squeeze(-1), 1)
+        # th.randint(high=len(x.squeeze(-1)), size=(1,))
+        # if x.squeeze(-1).sum() == 0 or x.squeeze(-1).sum().isnan()
+        th.multinomial(x.squeeze(-1), 1)
         for x in probs_split
     ]
 
