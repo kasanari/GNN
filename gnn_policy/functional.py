@@ -199,19 +199,24 @@ def sample_action_and_node(
 @th.jit.script
 def sample_action_then_node(
     graph_embeds: Tensor,
-    node_embeds: Tensor,
-    a0_mask: Tensor,
-    a1_mask: Tensor,
+    node_predicate_embeds: Tensor,
+    predicate_mask: Tensor,
+    node_mask: Tensor,
     batch: Tensor,
     eval_action: Tensor | None = None,
     deterministic: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor]:
-    a1, pa1, entropy1 = graph_action(graph_embeds, a0_mask)
+    assert predicate_mask.dim() == 2, "action mask must be 2D"
+    assert node_mask.dim() == 1, "node mask must be 2D"
+    assert node_predicate_embeds.dim() == 2, "node embeddings must be 2D"
+    assert graph_embeds.dim() == 2, "graph embeddings must be 2D"
+
+    a1, pa1, entropy1 = graph_action(graph_embeds, predicate_mask)
     if eval_action is not None:
         a1 = eval_action[:, 0].long()
 
     a2, pa2, data_starts, entropy2 = sample_node_given_action(
-        node_embeds, a1, batch, a1_mask, deterministic=deterministic
+        node_predicate_embeds, a1, batch, node_mask, deterministic=deterministic
     )
     if eval_action is not None:
         a2 = eval_action[:, 1].long()
@@ -230,16 +235,21 @@ def sample_action_then_node(
 
 @th.jit.script
 def sample_node_then_action(
-    node_embeds: Tensor,
-    node_action_embeds: Tensor,
-    a0_mask: Tensor,
-    a1_mask: Tensor,
+    node_logits: Tensor,
+    node_predicate_embeds: Tensor,
+    node_mask: Tensor,
+    predicate_mask: Tensor,
     batch: Tensor,
     eval_action: Tensor | None = None,
     deterministic: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor]:
+    assert node_mask.dim() == 1, "node mask must be 2D"
+    assert node_logits.dim() == 1, "node logits must be 1D"
+    assert predicate_mask.dim() == 2, "action mask must be 2D"
+    assert node_predicate_embeds.dim() == 2, "node action embeddings must be 2D"
+
     a1, pa1, data_starts, entropy1 = sample_node(
-        node_embeds, a0_mask, batch, deterministic
+        node_logits, node_mask, batch, deterministic
     )
     if eval_action is not None:
         a1 = eval_action[:, 1].long().view(-1, 1)
@@ -247,7 +257,7 @@ def sample_node_then_action(
 
     # batch = self._propagate_choice(batch,a1,data_starts)
     a2, pa2, _, entropy2 = sample_action_given_node(
-        node_action_embeds, a1, a1_mask, batch, deterministic
+        node_predicate_embeds, a1, predicate_mask, batch, deterministic
     )
     if eval_action is not None:
         a2 = eval_action[:, 0].long().view(-1, 1)
