@@ -66,7 +66,7 @@ def segmented_gather(src: Tensor, indices: Tensor, start_indices: Tensor) -> Ten
 
 @th.jit.script
 def gather(src: Tensor, indices: Tensor) -> Tensor:
-    return src.gather(-1, indices)
+    return src.gather(-1, indices).squeeze(-1)
 
 
 @th.jit.script
@@ -169,28 +169,40 @@ def concat_actions(predicate_action: Tensor, object_action: Tensor) -> Tensor:
 @th.jit.script
 def sample_action_and_node(
     graph_embeds: Tensor,
-    node_embeds: Tensor,
-    a0_mask: Tensor,
-    a1_mask: Tensor,
+    node_logits: Tensor,
+    predicate_mask: Tensor,
+    node_mask: Tensor,
     batch: Tensor,
     eval_action: Tensor | None = None,
 ) -> tuple[Tensor, Tensor, Tensor]:
-    a1, pa1, entropy1 = graph_action(graph_embeds, a0_mask)
+    assert predicate_mask.dim() == 2, "action mask must be 2D"
+    assert node_mask.dim() == 1, "node mask must be 2D"
+    assert node_logits.dim() == 1, "node embeddings must be 2D"
+    assert graph_embeds.dim() == 2, "graph embeddings must be 2D"
+
+    a1, pa1, entropy1 = graph_action(graph_embeds, predicate_mask)
     if eval_action is not None:
         a1 = eval_action[:, 0].long().view(-1, 1)
     a1_p = gather(pa1, a1)
 
     # x_a1 = self.action_net2(batch.x).flatten()
-    a2, pa2, data_starts, entropy2 = sample_node(node_embeds, a1_mask, batch)
+    a2, pa2, data_starts, entropy2 = sample_node(node_logits, node_mask, batch)
     if eval_action is not None:
         a2 = eval_action[:, 1].long().view(-1, 1)
     a2_p = segmented_gather(pa2, a2, data_starts)
 
-    tot_log_prob = th.log(a1_p * a2_p).squeeze(-1)
+    tot_log_prob = th.log(a1_p * a2_p)
     tot_entropy = entropy1 + entropy2  # H(X, Y) = H(X) + H(Y|X)
 
+    a = concat_actions(predicate_action=a1, object_action=a2)
+
+    assert tot_log_prob.shape[0] == predicate_mask.shape[0]
+    assert tot_entropy.dim() == 0, "entropy must be a scalar"
+    assert a.shape[0] == predicate_mask.shape[0]
+    assert a.shape[1] == 2, "action must have two components, was {}".format(a.shape)
+
     return (
-        concat_actions(predicate_action=a1, object_action=a2),
+        a,
         tot_log_prob,
         tot_entropy,
     )
@@ -223,11 +235,18 @@ def sample_action_then_node(
 
     a1_p = gather(pa1, a1)
     a2_p = segmented_gather(pa2, a2, data_starts)
-    tot_log_prob = th.log(a1_p * a2_p).squeeze(-1)
+    tot_log_prob = th.log(a1_p * a2_p)
     tot_entropy = entropy1 + entropy2  # H(X, Y) = H(X) + H(Y|X)
 
+    a = concat_actions(predicate_action=a1, object_action=a2)
+
+    assert tot_log_prob.shape[0] == predicate_mask.shape[0]
+    assert tot_entropy.dim() == 0, "entropy must be a scalar"
+    assert a.shape[0] == predicate_mask.shape[0]
+    assert a.shape[1] == 2, "action must have two components, was {}".format(a.shape)
+
     return (
-        concat_actions(predicate_action=a1, object_action=a2),
+        a,
         tot_log_prob,
         tot_entropy,
     )
@@ -243,7 +262,7 @@ def sample_node_then_action(
     eval_action: Tensor | None = None,
     deterministic: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor]:
-    assert node_mask.dim() == 1, "node mask must be 2D"
+    assert node_mask.dim() == 1, "node mask must be 1D"
     assert node_logits.dim() == 1, "node logits must be 1D"
     assert predicate_mask.dim() == 2, "action mask must be 2D"
     assert node_predicate_embeds.dim() == 2, "node action embeddings must be 2D"
@@ -261,13 +280,21 @@ def sample_node_then_action(
     )
     if eval_action is not None:
         a2 = eval_action[:, 0].long().view(-1, 1)
+
     a2_p = gather(pa2, a2)
 
-    tot_log_prob = th.log(a1_p * a2_p).squeeze(-1)
+    tot_log_prob = th.log(a1_p * a2_p)
     tot_entropy = entropy1 + entropy2  # H(X, Y) = H(X) + H(Y|X)
 
+    a = concat_actions(predicate_action=a2, object_action=a1)
+
+    assert tot_log_prob.shape[0] == predicate_mask.shape[0]
+    assert tot_entropy.dim() == 0, "entropy must be a scalar"
+    assert a.shape[0] == predicate_mask.shape[0]
+    assert a.shape[1] == 2, "action must have two components, was {}".format(a.shape)
+
     return (
-        concat_actions(predicate_action=a2, object_action=a1),
+        a,
         tot_log_prob,
         tot_entropy,
     )
