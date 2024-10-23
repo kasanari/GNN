@@ -150,7 +150,7 @@ def sample_node_given_action(
     deterministic: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     # a single action is performed for each graph
-    a_expanded = action[batch]  # .view(-1, 1)
+    a_expanded = action[batch].view(-1, 1)
     # only the activations for the selected action are kept
     x_a1 = node_embeds.gather(-1, a_expanded).squeeze(-1)
 
@@ -159,6 +159,7 @@ def sample_node_given_action(
 
 @th.jit.script
 def concat_actions(predicate_action: Tensor, object_action: Tensor) -> Tensor:
+    "Action is formatted as P(x)"
     if predicate_action.dim() == 1:
         predicate_action = predicate_action.view(-1, 1)
     if object_action.dim() == 1:
@@ -217,7 +218,7 @@ def sample_action_then_node(
     batch: Tensor,
     eval_action: Tensor | None = None,
     deterministic: bool = False,
-) -> tuple[Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
     assert predicate_mask.dim() == 2, "action mask must be 2D"
     assert node_mask.dim() == 1, "node mask must be 2D"
     assert node_predicate_embeds.dim() == 2, "node embeddings must be 2D"
@@ -225,7 +226,7 @@ def sample_action_then_node(
 
     a1, pa1, entropy1 = graph_action(graph_embeds, predicate_mask)
     if eval_action is not None:
-        a1 = eval_action[:, 0].long()
+        a1 = th.atleast_2d(eval_action[:, 0].long())
 
     a2, pa2, data_starts, entropy2 = sample_node_given_action(
         node_predicate_embeds, a1, batch, node_mask, deterministic=deterministic
@@ -249,6 +250,8 @@ def sample_action_then_node(
         a,
         tot_log_prob,
         tot_entropy,
+        pa1,
+        pa2,
     )
 
 
@@ -261,7 +264,7 @@ def sample_node_then_action(
     batch: Tensor,
     eval_action: Tensor | None = None,
     deterministic: bool = False,
-) -> tuple[Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
     assert node_mask.dim() == 1, "node mask must be 1D"
     assert node_logits.dim() == 1, "node logits must be 1D"
     assert predicate_mask.dim() == 2, "action mask must be 2D"
@@ -291,13 +294,9 @@ def sample_node_then_action(
     assert tot_log_prob.shape[0] == predicate_mask.shape[0]
     assert tot_entropy.dim() == 0, "entropy must be a scalar"
     assert a.shape[0] == predicate_mask.shape[0]
-    assert a.shape[1] == 2, "action must have two components, was {}".format(a.shape)
+    assert a.shape[1] == 2, f"action must have two components, was {a.shape}"
 
-    return (
-        a,
-        tot_log_prob,
-        tot_entropy,
-    )
+    return (a, tot_log_prob, tot_entropy, pa1, pa2)
 
 
 @th.jit.script

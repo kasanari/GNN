@@ -312,7 +312,7 @@ class GNNPolicy(BasePolicy):
         values = self.value_net(vf_embed)
 
         # Evaluate the values for the given observations
-        actions, log_prob, _ = self._get_action_from_latent(
+        actions, log_prob, *_ = self._get_action_from_latent(
             obs, node_embeds, graph_embeds, batch_idx, deterministic=deterministic
         )
         return actions, values, log_prob
@@ -415,7 +415,7 @@ class GNNPolicy(BasePolicy):
         batch,
         eval_action=None,
     ):
-        x1 = self.action_net(node_latent)
+        x1 = self.action_net(node_latent).squeeze(-1)
         x2 = self.action_net2(node_latent)
         # note that the action_masks are reversed here, since we now pick the node first
         return sample_node_then_action(
@@ -452,10 +452,14 @@ class GNNPolicy(BasePolicy):
         :return: Taken action according to the policy
         """
         latent_nodes, latent_global, batch_idx, _ = self._get_latent(obs)
-        actions, log_prob, entropy = self._get_action_from_latent(
+        actions, *_ = self._get_action_from_latent(
             obs, latent_nodes, latent_global, batch_idx
         )
         return actions
+
+    def get_full_prediction(self, obs: Dict[str, Tensor], deterministic: bool = False):
+        latent_nodes, latent_global, batch_idx, _ = self._get_latent(obs)
+        return self._get_action_from_latent(obs, latent_nodes, latent_global, batch_idx)
 
     # REQUIRED FOR ON-POLICY ALGORITHMS (in SB3)
     def predict_values(self, obs: Dict[str, Tensor]) -> th.Tensor:
@@ -478,7 +482,7 @@ class GNNPolicy(BasePolicy):
         """
 
         latent_nodes, latent_global, batch_idx, vf_embed = self._get_latent(obs)
-        _, log_prob, entropy = self._get_action_from_latent(
+        _, log_prob, entropy, _, _ = self._get_action_from_latent(
             obs, latent_nodes, latent_global, batch_idx, eval_action=actions
         )
         values = self.value_net(vf_embed)
