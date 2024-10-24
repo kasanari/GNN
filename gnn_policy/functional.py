@@ -238,7 +238,7 @@ def sample_action_then_node(
         deterministic=deterministic,
     )
     if eval_action is not None:
-        node_action = eval_action[:, 1].long()
+        node_action = eval_action[:, 1].long().view(-1, 1)
         assert node_action.dim() == 2
         assert node_action.shape[-1] == 1
 
