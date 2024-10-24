@@ -53,7 +53,7 @@ def gnn_str_to_class(gnn_class: str) -> type[nn.Module]:
         raise ValueError(f"Unknown GNN class: {gnn_class}")
 
 
-class GNNPolicy(nn.Module):
+class LoadablePolicy(nn.Module):
     def __init__(
         self,
         observation_space: gym.spaces.Space,
