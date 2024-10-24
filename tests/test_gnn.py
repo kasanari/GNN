@@ -180,7 +180,7 @@ def test_sample_action_then_node():
     mask2 = th.tensor([True, True, False])
     batch = th.tensor([0, 0, 0])
 
-    a, logprob, h = F.sample_action_then_node(
+    a, logprob, h, *_ = F.sample_action_then_node(
         x1,
         x2,
         mask1,
@@ -189,6 +189,19 @@ def test_sample_action_then_node():
     )
     assert (a == th.tensor([[0, 0]])).all()
     assert logprob.shape == (1,)
+
+    a, eval_logprob, h, *_ = F.sample_action_then_node(
+        x1,
+        x2,
+        mask1,
+        mask2,
+        batch,
+        eval_action=a,
+    )
+
+    assert (a == th.tensor([[0, 0]])).all()
+    assert eval_logprob.shape == (1,)
+    assert eval_logprob == logprob
 
 
 def test_sample_node_then_action():
@@ -198,7 +211,7 @@ def test_sample_node_then_action():
     mask2 = th.tensor([[True, False]])
     batch = th.tensor([0, 0, 0])
 
-    a, logprob, h = F.sample_node_then_action(
+    a, logprob, h, *_ = F.sample_node_then_action(
         x1,
         x2,
         mask1,
@@ -207,6 +220,19 @@ def test_sample_node_then_action():
     )
     assert (a == th.tensor([[0, 0]])).all()
     assert logprob.shape == (1,)
+
+    a, eval_logprob, h, *_ = F.sample_node_then_action(
+        x1,
+        x2,
+        mask1,
+        mask2,
+        batch,
+        eval_action=a,
+    )
+
+    assert (a == th.tensor([[0, 0]])).all()
+    assert eval_logprob.shape == (1,)
+    assert eval_logprob == logprob
 
 
 def test_sample_node_set():

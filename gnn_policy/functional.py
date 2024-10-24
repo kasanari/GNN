@@ -224,22 +224,26 @@ def sample_action_then_node(
     assert node_predicate_embeds.dim() == 2, "node embeddings must be 2D"
     assert graph_embeds.dim() == 2, "graph embeddings must be 2D"
 
-    a1, pa1, entropy1 = graph_action(graph_embeds, predicate_mask)
+    predicate_action, pa1, entropy1 = graph_action(graph_embeds, predicate_mask)
     if eval_action is not None:
-        a1 = th.atleast_2d(eval_action[:, 0].long())
+        predicate_action = th.atleast_2d(eval_action[:, 0].long())
 
-    a2, pa2, data_starts, entropy2 = sample_node_given_action(
-        node_predicate_embeds, a1, batch, node_mask, deterministic=deterministic
+    node_action, pa2, data_starts, entropy2 = sample_node_given_action(
+        node_predicate_embeds,
+        predicate_action,
+        batch,
+        node_mask,
+        deterministic=deterministic,
     )
     if eval_action is not None:
-        a2 = eval_action[:, 1].long()
+        node_action = eval_action[:, 1].long()
 
-    a1_p = gather(pa1, a1)
-    a2_p = segmented_gather(pa2, a2, data_starts)
+    a1_p = gather(pa1, predicate_action)
+    a2_p = segmented_gather(pa2, node_action, data_starts)
     tot_log_prob = th.log(a1_p * a2_p)
     tot_entropy = entropy1 + entropy2  # H(X, Y) = H(X) + H(Y|X)
 
-    a = concat_actions(predicate_action=a1, object_action=a2)
+    a = concat_actions(predicate_action=predicate_action, object_action=node_action)
 
     assert tot_log_prob.shape[0] == predicate_mask.shape[0]
     assert tot_entropy.dim() == 0, "entropy must be a scalar"
@@ -270,26 +274,28 @@ def sample_node_then_action(
     assert predicate_mask.dim() == 2, "action mask must be 2D"
     assert node_predicate_embeds.dim() == 2, "node action embeddings must be 2D"
 
-    a1, pa1, data_starts, entropy1 = sample_node(
+    node_action, pa1, data_starts, entropy1 = sample_node(
         node_logits, node_mask, batch, deterministic
     )
     if eval_action is not None:
-        a1 = eval_action[:, 1].long().view(-1, 1)
-    a1_p = segmented_gather(pa1, a1, data_starts)  # probabilities of the selected nodes
+        node_action = eval_action[:, 1].long().view(-1, 1)
+    a1_p = segmented_gather(
+        pa1, node_action, data_starts
+    )  # probabilities of the selected nodes
 
     # batch = self._propagate_choice(batch,a1,data_starts)
-    a2, pa2, _, entropy2 = sample_action_given_node(
-        node_predicate_embeds, a1, predicate_mask, batch, deterministic
+    predicate_action, pa2, _, entropy2 = sample_action_given_node(
+        node_predicate_embeds, node_action, predicate_mask, batch, deterministic
     )
     if eval_action is not None:
-        a2 = eval_action[:, 0].long().view(-1, 1)
+        predicate_action = eval_action[:, 0].long().view(-1, 1)
 
-    a2_p = gather(pa2, a2)
+    a2_p = gather(pa2, predicate_action)
 
     tot_log_prob = th.log(a1_p * a2_p)
     tot_entropy = entropy1 + entropy2  # H(X, Y) = H(X) + H(Y|X)
 
-    a = concat_actions(predicate_action=a2, object_action=a1)
+    a = concat_actions(predicate_action=predicate_action, object_action=node_action)
 
     assert tot_log_prob.shape[0] == predicate_mask.shape[0]
     assert tot_entropy.dim() == 0, "entropy must be a scalar"
