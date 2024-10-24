@@ -181,10 +181,10 @@ def sample_action_and_node(
     assert node_logits.dim() == 1, "node embeddings must be 2D"
     assert graph_embeds.dim() == 2, "graph embeddings must be 2D"
 
-    a1, pa1, entropy1 = graph_action(graph_embeds, predicate_mask)
+    predicate_action, pa1, entropy1 = graph_action(graph_embeds, predicate_mask)
     if eval_action is not None:
-        a1 = eval_action[:, 0].long().view(-1, 1)
-    a1_p = gather(pa1, a1)
+        predicate_action = eval_action[:, 0].long().view(-1, 1)
+    a1_p = gather(pa1, predicate_action)
 
     # x_a1 = self.action_net2(batch.x).flatten()
     a2, pa2, data_starts, entropy2 = sample_node(node_logits, node_mask, batch)
@@ -195,7 +195,7 @@ def sample_action_and_node(
     tot_log_prob = th.log(a1_p * a2_p)
     tot_entropy = entropy1 + entropy2  # H(X, Y) = H(X) + H(Y|X)
 
-    a = concat_actions(predicate_action=a1, object_action=a2)
+    a = concat_actions(predicate_action=predicate_action, object_action=a2)
 
     assert tot_log_prob.shape[0] == predicate_mask.shape[0]
     assert tot_entropy.dim() == 0, "entropy must be a scalar"
@@ -226,7 +226,9 @@ def sample_action_then_node(
 
     predicate_action, pa1, entropy1 = graph_action(graph_embeds, predicate_mask)
     if eval_action is not None:
-        predicate_action = th.atleast_2d(eval_action[:, 0].long())
+        predicate_action = eval_action[:, 0].long().view(-1, 1)
+        assert predicate_action.dim() == 2
+        assert predicate_action.shape[-1] == 1
 
     node_action, pa2, data_starts, entropy2 = sample_node_given_action(
         node_predicate_embeds,
@@ -237,6 +239,8 @@ def sample_action_then_node(
     )
     if eval_action is not None:
         node_action = eval_action[:, 1].long()
+        assert node_action.dim() == 2
+        assert node_action.shape[-1] == 1
 
     a1_p = gather(pa1, predicate_action)
     a2_p = segmented_gather(pa2, node_action, data_starts)
@@ -279,6 +283,9 @@ def sample_node_then_action(
     )
     if eval_action is not None:
         node_action = eval_action[:, 1].long().view(-1, 1)
+        assert node_action.dim() == 2
+        assert node_action.shape[-1] == 1
+
     a1_p = segmented_gather(
         pa1, node_action, data_starts
     )  # probabilities of the selected nodes
@@ -289,6 +296,8 @@ def sample_node_then_action(
     )
     if eval_action is not None:
         predicate_action = eval_action[:, 0].long().view(-1, 1)
+        assert predicate_action.dim() == 2
+        assert predicate_action.shape[-1] == 1
 
     a2_p = gather(pa2, predicate_action)
 
