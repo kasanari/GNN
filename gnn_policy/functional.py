@@ -111,7 +111,7 @@ def sample_node(
         else segmented_argmax(p, data_splits)
     )
     h = masked_entropy(p, mask, a.shape[0])
-    return a, p, data_starts, h
+    return a, p, h, data_starts
 
 
 @th.jit.script
@@ -187,7 +187,7 @@ def sample_action_and_node(
     a1_p = gather(pa1, predicate_action)
 
     # x_a1 = self.action_net2(batch.x).flatten()
-    a2, pa2, data_starts, entropy2 = sample_node(node_logits, node_mask, batch)
+    a2, pa2, entropy2, data_starts = sample_node(node_logits, node_mask, batch)
     if eval_action is not None:
         a2 = eval_action[:, 1].long().view(-1, 1)
     a2_p = segmented_gather(pa2, a2, data_starts)
@@ -278,7 +278,7 @@ def sample_node_then_action(
     assert predicate_mask.dim() == 2, "action mask must be 2D"
     assert node_predicate_embeds.dim() == 2, "node action embeddings must be 2D"
 
-    node_action, pa1, data_starts, entropy1 = sample_node(
+    node_action, pa1, entropy1, data_starts = sample_node(
         node_logits, node_mask, batch, deterministic
     )
     if eval_action is not None:
@@ -311,7 +311,7 @@ def sample_node_then_action(
     assert a.shape[0] == predicate_mask.shape[0]
     assert a.shape[1] == 2, f"action must have two components, was {a.shape}"
 
-    return (a, tot_log_prob, tot_entropy, pa1, pa2)
+    return (a, tot_log_prob, tot_entropy, pa2, pa1)
 
 
 @th.jit.script
