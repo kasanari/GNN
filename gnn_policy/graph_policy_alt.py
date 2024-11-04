@@ -265,7 +265,7 @@ class GNNPolicy(BasePolicy):
 
         elif isinstance(self.action_dist, CategoricalDistribution):
             x_a1 = self.action_net(node_latent)
-            a1, pa1, data_starts, entropy = sample_node(x_a1, node_mask, batch_idx)
+            a1, pa1, entropy, data_starts = sample_node(x_a1, node_mask, batch_idx)
             if eval_action is not None:
                 a1 = eval_action.long()
 
