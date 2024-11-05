@@ -230,7 +230,7 @@ def sample_action_then_node(
         assert predicate_action.dim() == 2
         assert predicate_action.shape[-1] == 1
 
-    node_action, pa2, data_starts, entropy2 = sample_node_given_action(
+    node_action, pa2, entropy2, data_starts = sample_node_given_action(
         node_predicate_embeds,
         predicate_action,
         batch,
