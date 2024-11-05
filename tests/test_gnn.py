@@ -66,7 +66,7 @@ def test_sample_node():
     energies = th.tensor([50, 0, 0, 0, 50, 100])
     mask = th.tensor([True, True, True, True, True, False])
     batch_idx = th.tensor([0, 0, 0, 1, 1, 1])
-    a, p, data_starts, h = F.sample_node(energies, mask, batch_idx)
+    a, p, h, data_starts = F.sample_node(energies, mask, batch_idx)
     assert (data_starts == th.tensor([0, 3])).all()
     assert (a == th.tensor([[0], [1]])).all()
     assert (th.trunc(p) == th.tensor([[1.0, 0.0, 0.0, 0.0, 1.0, 0.0]])).all()
