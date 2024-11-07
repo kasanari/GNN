@@ -33,7 +33,7 @@ def collate(obs: dict[str, Tensor]) -> tuple[Tensor, Tensor, Tensor, Tensor, int
     datalist: list[Data] = [
         Data(
             x=obs["nodes"][i].float(),
-            edge_index=obs["edges"][i].T.long(),
+            edge_index=obs["edge_index"][i].T.long(),
             edge_attr=th.zeros(0),
         )
         for i in range(obs["nodes"].shape[0])
