@@ -1,6 +1,6 @@
 import collections
 from functools import partial
-from typing import Any, Dict, List, Optional, Tuple, Type, Union
+from typing import Any
 
 import gymnasium as gym
 import numpy as np
@@ -74,20 +74,20 @@ class GNNPolicy(BasePolicy):
         lr_schedule: Schedule,
         mask_func,
         batch_func,
-        net_arch: Optional[List[Union[int, Dict[str, List[int]]]]] = None,
-        activation_fn: Type[nn.Module] = nn.LeakyReLU,
+        net_arch: list[int | dict[str, list[int]]] | None = None,
+        activation_fn: type[nn.Module] = nn.LeakyReLU,
         ortho_init: bool = True,
         use_sde: bool = False,
         log_std_init: float = 0.0,
         full_std: bool = True,
-        sde_net_arch: Optional[List[int]] = None,
+        sde_net_arch: list[int] | None = None,
         use_expln: bool = False,
         squash_output: bool = False,
-        features_extractor_class: Type[BaseFeaturesExtractor] = NodeExtractor,
-        features_extractor_kwargs: Optional[Dict[str, Any]] = None,
+        features_extractor_class: type[BaseFeaturesExtractor] = NodeExtractor,
+        features_extractor_kwargs: dict[str, Any] | None = None,
         normalize_images: bool = True,
-        optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
-        optimizer_kwargs: Optional[Dict[str, Any]] = None,
+        optimizer_class: type[th.optim.Optimizer] = th.optim.Adam,
+        optimizer_kwargs: dict[str, Any] | None = None,
         **kwargs,
     ):
         if optimizer_kwargs is None:
@@ -106,8 +106,6 @@ class GNNPolicy(BasePolicy):
             squash_output=squash_output,
         )
 
-        self.activation_fn = activation_fn
-        self.ortho_init = ortho_init
         gnn_steps = int(kwargs.pop("gnn_steps"))
         emb_size = (
             features_extractor_kwargs.get("features_dim", 32)
@@ -211,11 +209,11 @@ class GNNPolicy(BasePolicy):
             raise NotImplementedError(f"Unsupported distribution '{self.action_dist}'.")
 
         self.value_net = nn.Sequential(
-            nn.Linear(emb_size, emb_size), self.activation_fn(), nn.Linear(emb_size, 1)
+            nn.Linear(emb_size, emb_size), activation_fn(), nn.Linear(emb_size, 1)
         )
         # Init weights: use orthogonal initialization
         # with small initial weight for the output
-        if self.ortho_init:
+        if ortho_init:
             module_gains = {
                 self.features_extractor: np.sqrt(2),
                 self.gnn_extractor: np.sqrt(2),
@@ -232,7 +230,7 @@ class GNNPolicy(BasePolicy):
             self.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs
         )
 
-    def _get_data(self) -> Dict[str, Any]:
+    def _get_data(self) -> dict[str, Any]:
         data = super(BasePolicy)._get_data()
 
         default_none_kwargs = self.dist_kwargs or collections.defaultdict(lambda: None)
@@ -269,8 +267,8 @@ class GNNPolicy(BasePolicy):
         self.action_dist.sample_weights(self.log_std, batch_size=n_envs)
 
     def forward(
-        self, obs: Dict, deterministic: bool = False, action_masks=None
-    ) -> Tuple[th.Tensor, th.Tensor, th.Tensor]:
+        self, obs: dict, deterministic: bool = False, action_masks=None
+    ) -> tuple[th.Tensor, th.Tensor, th.Tensor]:
         """
         Forward pass in all the networks (actor and critic)
 
@@ -289,8 +287,8 @@ class GNNPolicy(BasePolicy):
         return actions, values, log_prob
 
     def _get_latent(
-        self, obs: Dict[str, Tensor]
-    ) -> Tuple[th.Tensor, th.Tensor, th.Tensor, th.Tensor]:
+        self, obs: dict[str, Tensor]
+    ) -> tuple[th.Tensor, th.Tensor, th.Tensor, th.Tensor]:
         """
         Get the latent code (i.e., activations of the last layer of each network)
         for the different networks.
@@ -322,7 +320,7 @@ class GNNPolicy(BasePolicy):
         node_latent: Tensor,
         graph_latent: Tensor,
         batch_idx: Tensor,
-        latent_sde: Optional[th.Tensor] = None,
+        latent_sde: th.Tensor | None = None,
         deterministic: bool = False,
         eval_action=None,
     ):
@@ -366,7 +364,7 @@ class GNNPolicy(BasePolicy):
         else:
             raise ValueError("Invalid action distribution")
 
-    def _get_constructor_parameters(self) -> Dict[str, Any]:
+    def _get_constructor_parameters(self) -> dict[str, Any]:
         base = super()._get_constructor_parameters()
         added = {
             "action_mode": self.action_order,
@@ -447,7 +445,7 @@ class GNNPolicy(BasePolicy):
 
     # REQUIRED FOR ON-POLICY ALGORITHMS (in SB3)
     def _predict(
-        self, obs: Dict[str, Tensor], deterministic: bool = False
+        self, obs: dict[str, Tensor], deterministic: bool = False
     ) -> th.Tensor:
         """
         Get the action according to the policy for a given observation.
@@ -462,22 +460,22 @@ class GNNPolicy(BasePolicy):
         )
         return actions
 
-    def get_full_prediction(self, obs: Dict[str, Tensor], deterministic: bool = False):
+    def get_full_prediction(self, obs: dict[str, Tensor], deterministic: bool = False):
         latent_nodes, latent_global, batch_idx, _ = self._get_latent(obs)
         return self._get_action_from_latent(
             obs, latent_nodes, latent_global, batch_idx, deterministic=deterministic
         )
 
     # REQUIRED FOR ON-POLICY ALGORITHMS (in SB3)
-    def predict_values(self, obs: Dict[str, Tensor]) -> th.Tensor:
+    def predict_values(self, obs: dict[str, Tensor]) -> th.Tensor:
         _, _, _, vf_embed = self._get_latent(obs)
         values = self.value_net(vf_embed)
         return values
 
     # REQUIRED FOR ON-POLICY ALGORITHMS
     def evaluate_actions(
-        self, obs: Dict[str, Tensor], actions: th.Tensor, action_masks: th.Tensor = None
-    ) -> Tuple[th.Tensor, th.Tensor, th.Tensor]:
+        self, obs: dict[str, Tensor], actions: th.Tensor, action_masks: th.Tensor = None
+    ) -> tuple[th.Tensor, th.Tensor, th.Tensor]:
         """
         Evaluate actions according to the current policy,
         given the observations.
