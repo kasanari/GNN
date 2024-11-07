@@ -18,6 +18,8 @@ def masked_segmented_softmax(
     infty = th.tensor(-1e9, device=energies.device)
     masked_energies = th.where(mask, energies, infty)
     probs = softmax(masked_energies, batch_ind)
+    assert not (probs.isnan()).any()
+    assert not (probs.isinf()).any()
     return probs
 
 
@@ -25,7 +27,10 @@ def masked_segmented_softmax(
 def masked_softmax(x: Tensor, mask: Tensor) -> Tensor:
     infty = th.tensor(-1e9, device=x.device)
     masked_x = th.where(mask, x, infty)
-    return nn.functional.softmax(masked_x, -1)
+    probs = nn.functional.softmax(masked_x, -1)
+    assert not (probs.isnan()).any()
+    assert not (probs.isinf()).any()
+    return probs
 
 
 @th.jit.script
@@ -220,7 +225,7 @@ def sample_action_then_node(
     deterministic: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
     assert predicate_mask.dim() == 2, "action mask must be 2D"
-    assert node_mask.dim() == 1, "node mask must be 2D"
+    assert node_mask.dim() == 1, "node mask must be 1D"
     assert node_predicate_embeds.dim() == 2, "node embeddings must be 2D"
     assert graph_embeds.dim() == 2, "graph embeddings must be 2D"
 
@@ -244,6 +249,9 @@ def sample_action_then_node(
 
     a1_p = gather(pa1, predicate_action)
     a2_p = segmented_gather(pa2, node_action, data_starts)
+
+    assert not (a2_p == 0).any(), "node probabilities must be non-zero"
+
     tot_log_prob = th.log(a1_p * a2_p)
     tot_entropy = entropy1 + entropy2  # H(X, Y) = H(X) + H(Y|X)
 
@@ -290,6 +298,8 @@ def sample_node_then_action(
         pa1, node_action, data_starts
     )  # probabilities of the selected nodes
 
+    assert not (a1_p == 0).any(), "node probabilities must be non-zero"
+
     # batch = self._propagate_choice(batch,a1,data_starts)
     predicate_action, pa2, _, entropy2 = sample_action_given_node(
         node_predicate_embeds, node_action, predicate_mask, batch, deterministic
@@ -310,6 +320,8 @@ def sample_node_then_action(
     assert tot_entropy.dim() == 0, "entropy must be a scalar"
     assert a.shape[0] == predicate_mask.shape[0]
     assert a.shape[1] == 2, f"action must have two components, was {a.shape}"
+
+    assert not tot_log_prob.isinf().any()
 
     return (a, tot_log_prob, tot_entropy, pa2, pa1)
 
