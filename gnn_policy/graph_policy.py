@@ -384,6 +384,8 @@ class GNNPolicy(BasePolicy):
                 "features_dim": self.emb_size,
                 "gnn_steps": self.gnn_steps,
             },
+            "mask_func": self.create_masks,
+            "batch_func": self.collate,
         }
         return {**base, **added}
 
