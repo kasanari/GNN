@@ -119,9 +119,9 @@ class GNNPolicy(BasePolicy):
 
         features_extractor = features_extractor_class(
             observation_space,
-            observation_space["nodes"].shape[-1],
+            input_dim=observation_space["nodes"].shape[-1],
             activation_fn=activation_fn,
-            **features_extractor_kwargs,
+            output_dim=emb_size,
         )  # TODO
 
         edge_dim = 1

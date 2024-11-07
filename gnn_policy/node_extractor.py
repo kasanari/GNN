@@ -17,16 +17,16 @@ class NodeExtractor(BaseFeaturesExtractor):
     def __init__(
         self,
         observation_space: gym.Space,
-        node_dim: int,
-        features_dim: int,
-        activation_fn: Type[nn.Module],
+        input_dim: int,
+        output_dim: int,
+        activation_fn: type[nn.Module],
     ):
         super(NodeExtractor, self).__init__(
             observation_space,
-            features_dim,
+            output_dim,
         )
         self.embed_node = nn.Sequential(
-            nn.Linear(node_dim, self.features_dim),
+            nn.Linear(input_dim, output_dim),
             activation_fn(),
         )
 
