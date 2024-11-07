@@ -113,23 +113,20 @@ class GNNPolicy(BasePolicy):
             else 32
         )
 
-        self.separate_actor_critic = bool(kwargs.pop("separate_actor_critic"))
+        separate_actor_critic = bool(kwargs.pop("separate_actor_critic"))
 
         action_mode = str(kwargs.pop("action_mode"))
 
-        self.features_extractor = features_extractor_class(
+        features_extractor = features_extractor_class(
             observation_space,
             observation_space["nodes"].shape[-1],
             activation_fn=activation_fn,
-            **self.features_extractor_kwargs,
+            **features_extractor_kwargs,
         )  # TODO
-        self.features_dim = self.features_extractor.features_dim
+
         edge_dim = 1
 
-        self.create_masks = mask_func
-        self.collate = batch_func
-
-        self.log_std_init = log_std_init
+        log_std_init = log_std_init
         dist_kwargs = None
         # Keyword arguments for gSDE distribution
         if use_sde:
@@ -140,19 +137,11 @@ class GNNPolicy(BasePolicy):
                 "learn_features": sde_net_arch is not None,
             }
 
-        self.sde_features_extractor = None
-        self.sde_net_arch = sde_net_arch
-        self.use_sde = use_sde
-        self.dist_kwargs = dist_kwargs
-        self.action_order = action_mode
         gnn_class = kwargs.pop("gnn_class")
         device = self.device
         # Action distribution
-        self.action_dist = make_proba_distribution(
-            action_space, use_sde=use_sde, dist_kwargs=dist_kwargs
-        )
 
-        self.gnn_extractor = GNNExtractor(
+        gnn_extractor = GNNExtractor(
             gnn_class,
             emb_size,
             edge_dim=edge_dim,
@@ -161,8 +150,8 @@ class GNNPolicy(BasePolicy):
             steps=gnn_steps,
         )
 
-        if self.separate_actor_critic:
-            self.vf_gnn_extractor = GNNExtractor(
+        if separate_actor_critic:
+            vf_gnn_extractor = GNNExtractor(
                 gnn_class,
                 emb_size,
                 edge_dim=edge_dim,
@@ -173,61 +162,83 @@ class GNNPolicy(BasePolicy):
 
         latent_dim_pi = emb_size
 
-        self.action_net: nn.Module
-        self.action_net2: nn.Module
+        action_dist = make_proba_distribution(
+            action_space, use_sde=use_sde, dist_kwargs=dist_kwargs
+        )
+
+        action_net: nn.Module
+        action_net2: nn.Module
         if isinstance(action_space, gym.spaces.MultiDiscrete):
             num_actions = action_space.nvec[0]
             if action_mode == "action_then_node":
-                self.action_func = self._sample_action_then_node
-                self.action_net = nn.Linear(emb_size, num_actions)
-                self.action_net2 = nn.Linear(emb_size, num_actions)
+                action_func = self._sample_action_then_node
+                action_net = nn.Linear(emb_size, num_actions)
+                action_net2 = nn.Linear(emb_size, num_actions)
             elif action_mode == "node_then_action":
-                self.action_func = self._sample_node_then_action
-                self.action_net = nn.Linear(emb_size, 1)
-                self.action_net2 = nn.Linear(emb_size, num_actions)
+                action_func = self._sample_node_then_action
+                action_net = nn.Linear(emb_size, 1)
+                action_net2 = nn.Linear(emb_size, num_actions)
             elif action_mode == "independent":
-                self.action_func = self._sample_action_and_node
-                self.action_net = nn.Linear(emb_size, num_actions)
-                self.action_net2 = nn.Linear(emb_size, 1)
+                action_func = self._sample_action_and_node
+                action_net = nn.Linear(emb_size, num_actions)
+                action_net2 = nn.Linear(emb_size, 1)
 
-        elif isinstance(self.action_dist, CategoricalDistribution):
-            self.action_net = nn.Linear(emb_size, 1)
+        elif isinstance(action_dist, CategoricalDistribution):
+            action_net = nn.Linear(emb_size, 1)
 
-        elif isinstance(self.action_dist, DiagGaussianDistribution):
-            self.action_net, self.log_std = self.action_dist.proba_distribution_net(
-                latent_dim=latent_dim_pi, log_std_init=self.log_std_init
+        elif isinstance(action_dist, DiagGaussianDistribution):
+            action_net, log_std = action_dist.proba_distribution_net(
+                latent_dim=latent_dim_pi, log_std_init=log_std_init
             )
-        elif isinstance(self.action_dist, MultiCategoricalDistribution):
-            self.action_net = self.action_dist.proba_distribution_net(
-                latent_dim=latent_dim_pi
-            )
-        elif isinstance(self.action_dist, BernoulliDistribution):
-            self.action_net = self.action_dist.proba_distribution_net(
-                latent_dim=latent_dim_pi
-            )
+        elif isinstance(action_dist, MultiCategoricalDistribution):
+            action_net = action_dist.proba_distribution_net(latent_dim=latent_dim_pi)
+        elif isinstance(action_dist, BernoulliDistribution):
+            action_net = action_dist.proba_distribution_net(latent_dim=latent_dim_pi)
         else:
-            raise NotImplementedError(f"Unsupported distribution '{self.action_dist}'.")
+            raise NotImplementedError(f"Unsupported distribution '{action_dist}'.")
 
-        self.value_net = nn.Sequential(
+        value_net = nn.Sequential(
             nn.Linear(emb_size, emb_size), activation_fn(), nn.Linear(emb_size, 1)
         )
         # Init weights: use orthogonal initialization
         # with small initial weight for the output
         if ortho_init:
             module_gains = {
-                self.features_extractor: np.sqrt(2),
-                self.gnn_extractor: np.sqrt(2),
-                # self.vf_gnn_extractor: np.sqrt(2),
-                self.action_net: 0.01,
-                self.action_net2: 0.01,
-                self.value_net: 1,
+                features_extractor: np.sqrt(2),
+                gnn_extractor: np.sqrt(2),
+                # vf_gnn_extractor: np.sqrt(2),
+                action_net: 0.01,
+                action_net2: 0.01,
+                value_net: 1,
             }
             for module, gain in module_gains.items():
                 module.apply(partial(self.init_weights, gain=gain))
 
         # Setup optimizer with initial learning rate
+
+        self.sde_features_extractor = None
+        self.sde_net_arch = sde_net_arch
+        self.use_sde = use_sde
+        self.dist_kwargs = dist_kwargs
+        self.action_order = action_mode
+        self.action_dist = action_dist
+        self.create_masks = mask_func
+        self.collate = batch_func
+        self.gnn_extractor = gnn_extractor
+        self.vf_gnn_extractor = vf_gnn_extractor
+        self.activation_fn = activation_fn
+        self.gnn_steps = gnn_steps
+        self.emb_size = emb_size
+        self.separate_actor_critic = separate_actor_critic
+        self.action_net = action_net
+        self.action_net2 = action_net2
+        self.action_func = action_func
+        self.value_net = value_net
+        self.features_extractor = features_extractor
+
+        # Note: this has to be done at the end
         self.optimizer = self.optimizer_class(
-            self.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs
+            self.parameters(), lr=lr_schedule(1), **optimizer_kwargs
         )
 
     def _get_data(self) -> dict[str, Any]:
