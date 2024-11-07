@@ -77,7 +77,7 @@ class LoadablePolicy(nn.Module):
         self.features_extractor = NodeExtractor(
             observation_space,
             node_feature_dim,
-            features_dim=embedding_dim,
+            output_dim=embedding_dim,
             activation_fn=activation_fn,
         )
 
@@ -128,7 +128,11 @@ class LoadablePolicy(nn.Module):
             self.action_net = nn.Linear(embedding_dim, num_actions)
             self.action_net2 = nn.Linear(embedding_dim, 1)
 
-        self.value_net = nn.Linear(embedding_dim, 1)
+        self.value_net = nn.Sequential(
+            nn.Linear(self.emb_size, self.emb_size),
+            activation_fn(),
+            nn.Linear(self.emb_size, 1),
+        )
 
     def _get_latent(
         self, obs: dict[str, Tensor]
