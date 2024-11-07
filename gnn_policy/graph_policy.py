@@ -108,8 +108,8 @@ class GNNPolicy(BasePolicy):
 
         self.activation_fn = activation_fn
         self.ortho_init = ortho_init
-        self.gnn_steps = kwargs.pop("gnn_steps")
-        self.emb_size = (
+        gnn_steps = kwargs.pop("gnn_steps")
+        emb_size = (
             features_extractor_kwargs.get("features_dim", 32)
             if features_extractor_kwargs
             else 32
@@ -126,7 +126,7 @@ class GNNPolicy(BasePolicy):
             **self.features_extractor_kwargs,
         )  # TODO
         self.features_dim = self.features_extractor.features_dim
-        self.edge_dim = 1
+        edge_dim = 1
 
         self.create_masks = mask_func
         self.collate = batch_func
@@ -147,79 +147,32 @@ class GNNPolicy(BasePolicy):
         self.use_sde = use_sde
         self.dist_kwargs = dist_kwargs
         self.action_order = action_mode
-        self.gnn_class = kwargs.pop("gnn_class")
-
+        gnn_class = kwargs.pop("gnn_class")
+        device = self.device
         # Action distribution
         self.action_dist = make_proba_distribution(
             action_space, use_sde=use_sde, dist_kwargs=dist_kwargs
         )
 
-        self._build(self.gnn_class, action_mode, lr_schedule)
-
-    def _get_data(self) -> Dict[str, Any]:
-        data = super(BasePolicy)._get_data()
-
-        default_none_kwargs = self.dist_kwargs or collections.defaultdict(lambda: None)
-
-        data.update(
-            dict(
-                net_arch=self.net_arch,
-                activation_fn=self.activation_fn,
-                use_sde=self.use_sde,
-                log_std_init=self.log_std_init,
-                squash_output=default_none_kwargs["squash_output"],
-                full_std=default_none_kwargs["full_std"],
-                sde_net_arch=default_none_kwargs["sde_net_arch"],
-                use_expln=default_none_kwargs["use_expln"],
-                lr_schedule=self._dummy_schedule,  # dummy lr schedule, not needed for loading policy alone
-                ortho_init=self.ortho_init,
-                optimizer_class=self.optimizer_class,
-                optimizer_kwargs=self.optimizer_kwargs,
-                features_extractor_class=self.features_extractor_class,
-                features_extractor_kwargs=self.features_extractor_kwargs,
-            )
-        )
-        return data
-
-    def reset_noise(self, n_envs: int = 1) -> None:
-        """
-        Sample new weights for the exploration matrix.
-
-        :param n_envs:
-        """
-        assert isinstance(
-            self.action_dist, StateDependentNoiseDistribution
-        ), "reset_noise() is only available when using gSDE"
-        self.action_dist.sample_weights(self.log_std, batch_size=n_envs)
-
-    def _build(self, gnn_class, action_mode, lr_schedule: Schedule) -> None:
-        """
-        Create the networks and the optimizer.
-
-        :param lr_schedule: Learning rate schedule
-            lr_schedule(1) is the initial learning rate
-        """
-
         self.gnn_extractor = GNNExtractor(
             gnn_class,
-            self.emb_size,
-            edge_dim=self.edge_dim,
-            activation_fn=self.activation_fn,
-            device=self.device,
-            steps=self.gnn_steps,
+            emb_size,
+            edge_dim=edge_dim,
+            activation_fn=activation_fn,
+            device=device,
+            steps=gnn_steps,
         )
 
         if self.separate_actor_critic:
             self.vf_gnn_extractor = GNNExtractor(
                 gnn_class,
-                self.emb_size,
-                edge_dim=self.edge_dim,
-                activation_fn=self.activation_fn,
-                device=self.device,
-                steps=self.gnn_steps,
+                emb_size,
+                edge_dim=edge_dim,
+                activation_fn=activation_fn,
+                device=device,
+                steps=gnn_steps,
             )
 
-        emb_size = self.emb_size
         latent_dim_pi = emb_size
 
         self.action_net: nn.Module
@@ -238,26 +191,6 @@ class GNNPolicy(BasePolicy):
                 self.action_func = self._sample_action_and_node
                 self.action_net = nn.Linear(emb_size, num_actions)
                 self.action_net2 = nn.Linear(emb_size, 1)
-
-            # self.action_net = nn.Linear(EMB_SIZE, 1)
-            # self.action_net2 = nn.Linear(EMB_SIZE, 1)
-            # self.sel_enc = nn.Sequential(nn.Linear(EMB_SIZE + 1, EMB_SIZE), nn.LeakyReLU() )
-            # self.a2 = GNNExtractor(self.edge_dim,steps=2)
-
-        # elif isinstance(self.action_space, NodeAction):
-        #     self.action_net = nn.Linear(emb_size, 1)
-
-        # elif isinstance(self.action_space, Autoregressive):
-        #     self.action_net = nn.Linear(emb_size, 1)
-        #     self.action_net2 = self.action_dist.proba_distribution_net(
-        #         latent_dim=emb_size
-        #     )
-        #     self.sel_enc = nn.Sequential(
-        #         nn.Linear(emb_size + 1, emb_size), nn.LeakyReLU()
-        #     )
-        #     self.a2 = GNNExtractor(
-        #         self.edge_dim, steps=2, activation_fn=self.activation_fn
-        #     )
 
         elif isinstance(self.action_dist, CategoricalDistribution):
             self.action_net = nn.Linear(emb_size, 1)
@@ -298,6 +231,42 @@ class GNNPolicy(BasePolicy):
         self.optimizer = self.optimizer_class(
             self.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs
         )
+
+    def _get_data(self) -> Dict[str, Any]:
+        data = super(BasePolicy)._get_data()
+
+        default_none_kwargs = self.dist_kwargs or collections.defaultdict(lambda: None)
+
+        data.update(
+            dict(
+                net_arch=self.net_arch,
+                activation_fn=self.activation_fn,
+                use_sde=self.use_sde,
+                log_std_init=self.log_std_init,
+                squash_output=default_none_kwargs["squash_output"],
+                full_std=default_none_kwargs["full_std"],
+                sde_net_arch=default_none_kwargs["sde_net_arch"],
+                use_expln=default_none_kwargs["use_expln"],
+                lr_schedule=self._dummy_schedule,  # dummy lr schedule, not needed for loading policy alone
+                ortho_init=self.ortho_init,
+                optimizer_class=self.optimizer_class,
+                optimizer_kwargs=self.optimizer_kwargs,
+                features_extractor_class=self.features_extractor_class,
+                features_extractor_kwargs=self.features_extractor_kwargs,
+            )
+        )
+        return data
+
+    def reset_noise(self, n_envs: int = 1) -> None:
+        """
+        Sample new weights for the exploration matrix.
+
+        :param n_envs:
+        """
+        assert isinstance(
+            self.action_dist, StateDependentNoiseDistribution
+        ), "reset_noise() is only available when using gSDE"
+        self.action_dist.sample_weights(self.log_std, batch_size=n_envs)
 
     def forward(
         self, obs: Dict, deterministic: bool = False, action_masks=None
