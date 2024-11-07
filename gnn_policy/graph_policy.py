@@ -375,6 +375,7 @@ class GNNPolicy(BasePolicy):
                 node_mask,
                 batch_idx,
                 eval_action,
+                deterministic=deterministic,
             )
 
         elif isinstance(self.action_dist, CategoricalDistribution):
@@ -414,30 +415,63 @@ class GNNPolicy(BasePolicy):
         node_mask,
         batch,
         eval_action=None,
+        deterministic=False,
     ):
         x1 = self.action_net(node_latent).squeeze(-1)
         x2 = self.action_net2(node_latent)
         # note that the action_masks are reversed here, since we now pick the node first
         return sample_node_then_action(
-            x1, x2, node_mask, action_mask, batch, eval_action
+            x1,
+            x2,
+            node_mask,
+            action_mask,
+            batch,
+            eval_action,
+            deterministic=deterministic,
         )
 
     def _sample_action_and_node(
-        self, node_latent, graph_latent, action_mask, node_mask, batch, eval_action=None
+        self,
+        node_latent,
+        graph_latent,
+        action_mask,
+        node_mask,
+        batch,
+        eval_action=None,
+        deterministic=False,
     ):
         x1 = self.action_net(graph_latent)
         x2 = self.action_net2(node_latent)
         return sample_action_and_node(
-            x1, x2, action_mask, node_mask, batch, eval_action
+            x1,
+            x2,
+            action_mask,
+            node_mask,
+            batch,
+            eval_action,
+            deterministic=deterministic,
         )
 
     def _sample_action_then_node(
-        self, node_latent, graph_latent, action_mask, node_mask, batch, eval_action=None
+        self,
+        node_latent,
+        graph_latent,
+        action_mask,
+        node_mask,
+        batch,
+        eval_action=None,
+        deterministic=False,
     ):
         x1 = self.action_net(graph_latent)
         x2 = self.action_net2(node_latent)
         return sample_action_then_node(
-            x1, x2, action_mask, node_mask, batch, eval_action
+            x1,
+            x2,
+            action_mask,
+            node_mask,
+            batch,
+            eval_action,
+            deterministic=deterministic,
         )
 
     # REQUIRED FOR ON-POLICY ALGORITHMS (in SB3)
@@ -453,13 +487,15 @@ class GNNPolicy(BasePolicy):
         """
         latent_nodes, latent_global, batch_idx, _ = self._get_latent(obs)
         actions, *_ = self._get_action_from_latent(
-            obs, latent_nodes, latent_global, batch_idx
+            obs, latent_nodes, latent_global, batch_idx, deterministic=deterministic
         )
         return actions
 
     def get_full_prediction(self, obs: Dict[str, Tensor], deterministic: bool = False):
         latent_nodes, latent_global, batch_idx, _ = self._get_latent(obs)
-        return self._get_action_from_latent(obs, latent_nodes, latent_global, batch_idx)
+        return self._get_action_from_latent(
+            obs, latent_nodes, latent_global, batch_idx, deterministic=deterministic
+        )
 
     # REQUIRED FOR ON-POLICY ALGORITHMS (in SB3)
     def predict_values(self, obs: Dict[str, Tensor]) -> th.Tensor:
