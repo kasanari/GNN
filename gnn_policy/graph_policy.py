@@ -108,20 +108,20 @@ class GNNPolicy(BasePolicy):
 
         self.activation_fn = activation_fn
         self.ortho_init = ortho_init
-        gnn_steps = kwargs.pop("gnn_steps")
+        gnn_steps = int(kwargs.pop("gnn_steps"))
         emb_size = (
             features_extractor_kwargs.get("features_dim", 32)
             if features_extractor_kwargs
             else 32
         )
 
-        self.separate_actor_critic = kwargs.pop("separate_actor_critic")
+        self.separate_actor_critic = bool(kwargs.pop("separate_actor_critic"))
 
-        action_mode = kwargs.pop("action_mode")
+        action_mode = str(kwargs.pop("action_mode"))
 
         self.features_extractor = features_extractor_class(
-            self.observation_space,
-            self.observation_space["nodes"].shape[-1],
+            observation_space,
+            observation_space["nodes"].shape[-1],
             activation_fn=activation_fn,
             **self.features_extractor_kwargs,
         )  # TODO
@@ -177,8 +177,8 @@ class GNNPolicy(BasePolicy):
 
         self.action_net: nn.Module
         self.action_net2: nn.Module
-        if isinstance(self.action_space, gym.spaces.MultiDiscrete):
-            num_actions = self.action_space.nvec[0]
+        if isinstance(action_space, gym.spaces.MultiDiscrete):
+            num_actions = action_space.nvec[0]
             if action_mode == "action_then_node":
                 self.action_func = self._sample_action_then_node
                 self.action_net = nn.Linear(emb_size, num_actions)
