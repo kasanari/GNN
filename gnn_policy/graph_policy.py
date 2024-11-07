@@ -277,7 +277,9 @@ class GNNPolicy(BasePolicy):
         else:
             raise NotImplementedError(f"Unsupported distribution '{self.action_dist}'.")
 
-        self.value_net = nn.Linear(emb_size, 1)
+        self.value_net = nn.Sequential(
+            nn.Linear(emb_size, emb_size), self.activation_fn(), nn.Linear(emb_size, 1)
+        )
         # Init weights: use orthogonal initialization
         # with small initial weight for the output
         if self.ortho_init:
