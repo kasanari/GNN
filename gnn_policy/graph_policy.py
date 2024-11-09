@@ -1,6 +1,6 @@
 import collections
 from functools import partial
-from typing import Any
+from typing import Any, Callable
 
 import gymnasium as gym
 import numpy as np
@@ -27,6 +27,9 @@ from .functional import (
     sample_node,
     sample_node_then_action,
     segmented_gather,
+    eval_action_and_node,
+    eval_action_then_node,
+    eval_node_then_action,
 )
 from .gnn_extractor import GNNExtractor
 from .gnns import MultiMessagePassing
@@ -222,8 +225,8 @@ class GNNPolicy(BasePolicy):
         self.dist_kwargs = dist_kwargs
         self.action_order = action_mode
         self.action_dist = action_dist
-        self.create_masks = mask_func
-        self.collate = batch_func
+        self.create_masks: Callable[[dict[str, Any]], tuple[Tensor, Tensor]] = mask_func
+        self.collate: Callable[[dict[str, Any]], tuple[Tensor, Tensor]] = batch_func
         self.gnn_extractor = gnn_extractor
         self.vf_gnn_extractor = vf_gnn_extractor
         self.activation_fn = activation_fn
@@ -391,69 +394,99 @@ class GNNPolicy(BasePolicy):
 
     def _sample_node_then_action(
         self,
-        node_latent,
+        node_latent: Tensor,
         _,
-        action_mask,
-        node_mask,
-        batch,
-        eval_action=None,
-        deterministic=False,
+        action_mask: Tensor,
+        node_mask: Tensor,
+        batch: Tensor,
+        eval_action: Tensor | None = None,
+        deterministic: bool = False,
     ):
         x1 = self.action_net(node_latent).squeeze(-1)
         x2 = self.action_net2(node_latent)
         # note that the action_masks are reversed here, since we now pick the node first
-        return sample_node_then_action(
-            x1,
-            x2,
-            node_mask,
-            action_mask,
-            batch,
-            eval_action,
-            deterministic=deterministic,
+        return (
+            sample_node_then_action(
+                x1,
+                x2,
+                node_mask,
+                action_mask,
+                batch,
+                deterministic=deterministic,
+            )
+            if eval_action is None
+            else eval_node_then_action(
+                eval_action,
+                x1,
+                x2,
+                node_mask,
+                action_mask,
+                batch,
+            )
         )
 
     def _sample_action_and_node(
         self,
-        node_latent,
-        graph_latent,
-        action_mask,
-        node_mask,
-        batch,
-        eval_action=None,
-        deterministic=False,
+        node_latent: Tensor,
+        graph_latent: Tensor,
+        action_mask: Tensor,
+        node_mask: Tensor,
+        batch: Tensor,
+        eval_action: Tensor | None = None,
+        deterministic: bool = False,
     ):
         x1 = self.action_net(graph_latent)
         x2 = self.action_net2(node_latent)
-        return sample_action_and_node(
-            x1,
-            x2,
-            action_mask,
-            node_mask,
-            batch,
-            eval_action,
-            deterministic=deterministic,
+        return (
+            sample_action_and_node(
+                x1,
+                x2,
+                action_mask,
+                node_mask,
+                batch,
+                deterministic=deterministic,
+            )
+            if eval_action is None
+            else eval_action_and_node(
+                eval_action,
+                x1,
+                x2,
+                action_mask,
+                node_mask,
+                batch,
+            )
         )
 
     def _sample_action_then_node(
         self,
-        node_latent,
-        graph_latent,
-        action_mask,
-        node_mask,
-        batch,
-        eval_action=None,
-        deterministic=False,
+        node_latent: Tensor,
+        graph_latent: Tensor,
+        action_mask: Tensor,
+        node_mask: Tensor,
+        batch: Tensor,
+        eval_action: Tensor | None = None,
+        deterministic: bool = False,
     ):
         x1 = self.action_net(graph_latent)
         x2 = self.action_net2(node_latent)
-        return sample_action_then_node(
-            x1,
-            x2,
-            action_mask,
-            node_mask,
-            batch,
-            eval_action,
-            deterministic=deterministic,
+        return (
+            sample_action_then_node(
+                x1,
+                x2,
+                action_mask,
+                node_mask,
+                batch,
+                deterministic=deterministic,
+            )
+            if eval_action is None
+            else eval_action_then_node(
+                eval_action,
+                x1,
+                x2,
+                action_mask,
+                node_mask,
+                batch,
+            )
         )
 
     # REQUIRED FOR ON-POLICY ALGORITHMS (in SB3)
@@ -500,7 +533,7 @@ class GNNPolicy(BasePolicy):
         """
 
         latent_nodes, latent_global, batch_idx, vf_embed = self._get_latent(obs)
-        _, log_prob, entropy, _, _ = self._get_action_from_latent(
+        log_prob, entropy = self._get_action_from_latent(
             obs, latent_nodes, latent_global, batch_idx, eval_action=actions
         )
         values = self.value_net(vf_embed)
