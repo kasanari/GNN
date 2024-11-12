@@ -4,11 +4,69 @@ from torch_geometric.utils import softmax
 
 
 @th.jit.script
+def masked_softmax(x: Tensor, mask: Tensor) -> Tensor:
+    infty = th.tensor(-1e9, device=x.device)
+    masked_x = th.where(mask, x, infty)
+    probs = nn.functional.softmax(masked_x, -1)
+    assert not (probs.isnan()).any()
+    assert not (probs.isinf()).any()
+    return probs
+
+
+@th.jit.script
+def segmented_gather(src: Tensor, indices: Tensor, start_indices: Tensor) -> Tensor:
+    real_indices = start_indices + indices.squeeze()
+    return src[real_indices]
+
+
+@th.jit.script
+def gather(src: Tensor, indices: Tensor) -> Tensor:
+    return src.gather(-1, indices).squeeze(-1)
+
+
+@th.jit.script
+def sample_action(p: Tensor, deterministic: bool = False) -> Tensor:
+    a = th.multinomial(p, 1) if not deterministic else th.argmax(p, dim=-1).view(-1, 1)
+    return a
+
+
+@th.jit.script
+def get_start_indices(splits: Tensor) -> Tensor:
+    splits = th.roll(splits, 1)
+    splits[0] = 0
+    start_indices = th.cumsum(splits, 0)
+    return start_indices
+
+
+@th.jit.script
+def data_splits_and_starts(batch: Tensor) -> tuple[list[int], Tensor]:
+    data_splits: Tensor = th.unique(batch, return_counts=True)[1]  # nodes per graph
+    data_starts = get_start_indices(data_splits)  # start index of each graph
+    # lst_lens = Tensor([len(x.mask) for x in batch.to_data_list()], device=device)
+    # mask_starts = data_starts.repeat_interleave(lst_lens)
+    split_list: list[int] = data_splits.tolist()
+    return split_list, data_starts
+
+
+@th.jit.script
+def masked_segmented_softmax(
+    energies: Tensor, mask: Tensor, batch_ind: Tensor
+) -> Tensor:
+    infty = th.tensor(-1e9, device=energies.device)
+    masked_energies = th.where(mask, energies, infty)
+    probs = softmax(masked_energies, batch_ind)
+    assert not (probs.isnan()).any()
+    assert not (probs.isinf()).any()
+    return probs
+
+
+@th.jit.script
 def node_probs(x: Tensor, mask: Tensor, batch: Tensor):
     p = masked_segmented_softmax(x, mask, batch)
     return p
 
 
+@th.jit.script
 def action_given_node_probs(
     node_embeds: Tensor, node: Tensor, mask: Tensor, batch: Tensor
 ) -> Tensor:
@@ -40,36 +98,6 @@ def action_probs(x: Tensor, mask: Tensor):
 
 
 @th.jit.script
-def get_start_indices(splits: Tensor) -> Tensor:
-    splits = th.roll(splits, 1)
-    splits[0] = 0
-    start_indices = th.cumsum(splits, 0)
-    return start_indices
-
-
-@th.jit.script
-def masked_segmented_softmax(
-    energies: Tensor, mask: Tensor, batch_ind: Tensor
-) -> Tensor:
-    infty = th.tensor(-1e9, device=energies.device)
-    masked_energies = th.where(mask, energies, infty)
-    probs = softmax(masked_energies, batch_ind)
-    assert not (probs.isnan()).any()
-    assert not (probs.isinf()).any()
-    return probs
-
-
-@th.jit.script
-def masked_softmax(x: Tensor, mask: Tensor) -> Tensor:
-    infty = th.tensor(-1e9, device=x.device)
-    masked_x = th.where(mask, x, infty)
-    probs = nn.functional.softmax(masked_x, -1)
-    assert not (probs.isnan()).any()
-    assert not (probs.isinf()).any()
-    return probs
-
-
-@th.jit.script
 def segmented_sample(probs: Tensor, splits: list[int]) -> Tensor:
     probs_split = th.split(probs, splits)
     samples = [
@@ -97,33 +125,6 @@ def segmented_scatter_(
     real_indices = start_indices + indices
     dest[real_indices] = values
     return dest
-
-
-@th.jit.script
-def segmented_gather(src: Tensor, indices: Tensor, start_indices: Tensor) -> Tensor:
-    real_indices = start_indices + indices.squeeze()
-    return src[real_indices]
-
-
-@th.jit.script
-def gather(src: Tensor, indices: Tensor) -> Tensor:
-    return src.gather(-1, indices).squeeze(-1)
-
-
-@th.jit.script
-def data_splits_and_starts(batch: Tensor) -> tuple[list[int], Tensor]:
-    data_splits: Tensor = th.unique(batch, return_counts=True)[1]  # nodes per graph
-    data_starts = get_start_indices(data_splits)  # start index of each graph
-    # lst_lens = Tensor([len(x.mask) for x in batch.to_data_list()], device=device)
-    # mask_starts = data_starts.repeat_interleave(lst_lens)
-    split_list: list[int] = data_splits.tolist()
-    return split_list, data_starts
-
-
-@th.jit.script
-def sample_action(p: Tensor, deterministic: bool = False) -> Tensor:
-    a = th.multinomial(p, 1) if not deterministic else th.argmax(p, dim=-1).view(-1, 1)
-    return a
 
 
 @th.jit.script
@@ -211,8 +212,8 @@ def sample_action_and_node(
 
 @th.jit.script
 def sample_action_then_node(
-    graph_embeds: Tensor,
-    node_predicate_embeds: Tensor,
+    action_logits: Tensor,
+    node_predicate_logits: Tensor,
     predicate_mask: Tensor,
     node_mask: Tensor,
     batch: Tensor,
@@ -220,15 +221,16 @@ def sample_action_then_node(
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
     assert predicate_mask.dim() == 2, "action mask must be 2D"
     assert node_mask.dim() == 1, "node mask must be 1D"
-    assert node_predicate_embeds.dim() == 2, "node embeddings must be 2D"
-    assert graph_embeds.dim() == 2, "graph embeddings must be 2D"
+    assert node_predicate_logits.dim() == 2, "node embeddings must be 2D"
+    assert action_logits.dim() == 2, "graph embeddings must be 2D"
+    assert action_logits.shape[1] == predicate_mask.shape[1]
     num_graphs = predicate_mask.shape[0]
-    pa1 = action_probs(graph_embeds, predicate_mask)
+    pa1 = action_probs(action_logits, predicate_mask)
     entropy1 = masked_entropy(pa1, predicate_mask, num_graphs)
     predicate_action = sample_action(pa1, deterministic)
 
     pa2 = node_given_action_probs(
-        node_predicate_embeds, predicate_action, batch, node_mask
+        node_predicate_logits, predicate_action, batch, node_mask
     )
 
     entropy2 = masked_entropy(pa2, node_mask, num_graphs)
@@ -407,6 +409,7 @@ def eval_action_and_node(
     )
 
 
+@th.jit.script
 def eval_node_then_action(
     eval_action: Tensor,
     node_logits: Tensor,
@@ -454,6 +457,7 @@ def eval_node_then_action(
     return (tot_log_prob, tot_entropy)
 
 
+@th.jit.script
 def eval_action_then_node(
     eval_action: Tensor,
     graph_embeds: Tensor,

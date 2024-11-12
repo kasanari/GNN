@@ -153,7 +153,7 @@ def test_sample_action_and_node():
     mask2 = th.tensor([True, True, False])
     batch = th.tensor([0, 0, 0])
 
-    a, logprob, _ = F.sample_action_and_node(
+    a, logprob, *_ = F.sample_action_and_node(
         x1,
         x2,
         mask1,
