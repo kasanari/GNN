@@ -36,6 +36,7 @@ Mask: TypeAlias = Array
 
 def segmented_gather(src: Array):
     def g(start_indices: Array):
+        @jit
         def f(indices: Array) -> Array:
             real_indices = start_indices + indices.squeeze()
             return src[real_indices]
@@ -49,6 +50,7 @@ gather: Callable[[Array, Array], Array] = vmap(lambda x, y: x[y], in_axes=(0, 0)
 
 
 def sample_action(logits: Array) -> Callable[[Array], tuple[Array, Array]]:
+    @jit
     def f(key: Array):
         new_key, subkey = random.split(key)
         a = categorical(subkey, logits, 1)
@@ -57,10 +59,12 @@ def sample_action(logits: Array) -> Callable[[Array], tuple[Array, Array]]:
     return f
 
 
+@jit
 def select_max_action(logits: Array) -> Array:
     return argmax(logits, axis=-1)
 
 
+@jit
 def get_start_indices(splits: Array) -> Array:
     splits = roll(splits, 1)
     splits = splits.at[0].set(0)
@@ -68,24 +72,29 @@ def get_start_indices(splits: Array) -> Array:
     return start_indices
 
 
-def data_splits(batch: BatchIdx) -> Array:
-    return unique(batch, return_counts=True)[1]
+@jit
+def data_starts(n_nodes: Array) -> Array:
+    return get_start_indices(n_nodes)
 
 
-def data_starts(batch: BatchIdx) -> Array:
-    return get_start_indices(data_splits(batch))
-
-
+@jit
 def split_list(ds: Array) -> list[int]:
     return ds.tolist()
 
 
-def mask_logits(mask: Mask) -> Callable[[Array], Array]:
-    return lambda x: where(mask, x, -1e9)
+def mask_logits(mask: Mask):
+    @jit
+    def f(x: Array) -> Array:
+        return where(mask, x, -1e9)
+
+    return f
 
 
-def node_probs(batch: BatchIdx) -> Callable[[Array], Array]:
-    return lambda x: segment_softmax(x, batch)
+def node_probs(batch: BatchIdx):
+    def f(x: Array) -> Array:
+        return segment_softmax(x, batch)
+
+    return f
 
 
 def action_logits_given_node(node_embeds: Array):
@@ -94,6 +103,7 @@ def action_logits_given_node(node_embeds: Array):
     def f(ds: Array):
         y = x(ds)
 
+        @jit
         def h(node: Array) -> Array:
             logits = y(node)
             return logits
@@ -105,6 +115,7 @@ def action_logits_given_node(node_embeds: Array):
 
 def node_logits_given_action(batch: BatchIdx):
     def f(node_embeds: Array):
+        @jit
         def g(action: Array) -> Array:
             a_expanded = action[batch]  # .reshape(-1, 1)
             # a single action is performed for each graph
@@ -116,21 +127,20 @@ def node_logits_given_action(batch: BatchIdx):
     return f
 
 
+@jit
 def softmax(x: Array) -> Array:
     return nn.softmax(x, axis=-1)  # type: ignore
 
 
 def segmented_sample(logits: Array):
     def f(splits: list[int]):
+        @jit
         def g(key: Array):
-            probs_split = split(logits, splits)
+            probs_split = split(logits, splits.tolist())
             new_key, *subkeys = random.split(key, num=len(probs_split) + 1)
-            samples = [
-                # th.randint(high=len(x.squeeze(-1)), size=(1,))
-                # if x.squeeze(-1).sum() == 0 or x.squeeze(-1).sum().isnan()
-                categorical(k, x).reshape(1)
-                for k, x in zip(subkeys, probs_split)
-            ]
+            samples = jax.tree.map(
+                lambda k, x: categorical(k, x, 1).reshape(1), subkeys, probs_split
+            )
             return concatenate(samples), new_key
 
         return g
@@ -139,14 +149,16 @@ def segmented_sample(logits: Array):
 
 
 def segmented_argmax(probs: Array) -> Callable[[list[int]], Array]:
+    @jit
     def f(splits: list[int]) -> Array:
         probs_split = split(probs, splits)
-        samples = [argmax(x, axis=0).reshape(1) for x in probs_split]
+        samples = jax.tree.map(lambda x: argmax(x, axis=0).reshape(1), probs_split)
         return concatenate(samples)
 
     return f
 
 
+@jit
 def segmented_scatter_(
     dest: Array, indices: Array, start_indices: Array, values: Array
 ) -> Array:
@@ -155,7 +167,8 @@ def segmented_scatter_(
     return dest
 
 
-def entropy(batch_size: Array) -> Callable[[Array], Array]:
+def entropy(batch_size: Array):
+    @jit
     def f(p: Array) -> Array:
         log_probs = log(p + 1e-9)  # to avoid log(0)
         entropy = sum(-p * log_probs) / batch_size
@@ -169,6 +182,7 @@ def masked_entropy(batch_size: Array):
     x = entropy(batch_size)
 
     def g(mask: Mask):
+        @jit
         def h(p: Array) -> Array:
             unmasked_probs = where(mask, p, 1.0)
             return x(unmasked_probs)
@@ -178,12 +192,11 @@ def masked_entropy(batch_size: Array):
     return g
 
 
-def sample_node(batch: BatchIdx):
-    ds = split_list(data_splits(batch))
-
+def sample_node(n_nodes: Array):
     def f(logits: Array) -> Callable[[Array], tuple[Array, Array]]:
+        @jit
         def g(key: Array) -> tuple[Array, Array]:
-            a, new_key = segmented_sample(logits)(ds)(key)
+            a, new_key = segmented_sample(logits)(n_nodes)(key)
             return a, new_key
 
         return g
@@ -191,16 +204,16 @@ def sample_node(batch: BatchIdx):
     return f
 
 
-def select_node(batch: BatchIdx):
-    ds = split_list(data_splits(batch))
-
+def select_node(n_nodes: Array):
+    @jit
     def g(logits: Array) -> Array:
-        a = segmented_argmax(logits)(ds)
+        a = segmented_argmax(logits)(n_nodes)
         return a
 
     return g
 
 
+@jit
 def concat_actions(predicate_action: Array, object_action: Array) -> Array:
     "Action is formatted as P(x)"
     if predicate_action.ndim == 1:
@@ -217,6 +230,7 @@ def sample_action_and_node(
     predicate_mask: Mask,
     node_mask: Mask,
     batch: BatchIdx,
+    n_nodes: Array,
     deterministic: bool = False,
 ) -> tuple[Array, Array, Array, Array, Array]:
     assert predicate_mask.ndim == 2, "action mask must be 2D"
@@ -227,9 +241,8 @@ def sample_action_and_node(
     num_graphs = max(batch) + 1
     entropy = masked_entropy(num_graphs)
     node_prob = node_probs(batch)
-    sample_node_ = sample_node(batch)
-    select_node_ = select_node(batch)
-    ds = data_starts(batch)
+    sample_node_ = sample_node(n_nodes)
+    select_node_ = select_node(n_nodes)
 
     p_ml = mask_logits(predicate_mask)
     p_me = entropy(predicate_mask)
@@ -256,7 +269,7 @@ def sample_action_and_node(
         else select_node_(masked_node_logits)
     )
 
-    a2_p = segmented_gather(pa2)(ds)(a2)
+    a2_p = segmented_gather(pa2)(n_nodes)(a2)
     a2_p = where(
         predicate_action.squeeze() == 0, ones_like(a2_p), a2_p
     )  # Assume 0 means no action, therefore parameter prob is 1
@@ -280,16 +293,6 @@ def sample_action_and_node(
     )
 
 
-def sample(
-    key: Array,
-    action_sample_func: Callable[[Array], tuple[Array, Array]],
-    node_sample_func: Callable[[Array], Callable[[Array], tuple[Array, Array]]],
-):
-    predicate_action, key = action_sample_func(key)
-    node_action, key = node_sample_func(key)(predicate_action)
-    return predicate_action, node_action, key
-
-
 def eval_action_then_node(
     eval_action: Array,
     graph_embeds: Array,
@@ -297,6 +300,7 @@ def eval_action_then_node(
     predicate_mask: Mask,
     node_mask: Mask,
     batch: BatchIdx,
+    n_nodes: Array,
 ) -> tuple[Array, Array]:
     node_action = eval_action[:, 1]  # .long().view(-1, 1)
     predicate_action = eval_action[:, 0]  # .long().view(-1, 1)
@@ -308,8 +312,6 @@ def eval_action_then_node(
     assert node_action.ndim == 1
     assert predicate_action.ndim == 1
     assert predicate_action.ndim == 1
-
-    ds = data_starts(batch)
 
     entropy = masked_entropy(max(batch) + 1)
 
@@ -327,7 +329,7 @@ def eval_action_then_node(
 
     entropy2 = entropy(node_mask)(pa2)
 
-    a2_p = segmented_gather(pa2)(ds)(node_action)
+    a2_p = segmented_gather(pa2)(n_nodes)(node_action)
     a2_p = where(
         predicate_action.squeeze() == 0, ones_like(a2_p), a2_p
     )  # Assume 0 means no action, therefore parameter prob is 1
@@ -345,38 +347,6 @@ def eval_action_then_node(
     )
 
 
-def graph_masking(predicate_mask: Mask, entropy: Callable[[Array], Array]):
-    assert predicate_mask.ndim == 2, "action mask must be 2D"
-    p_ml = mask_logits(predicate_mask)
-    p_me = entropy(predicate_mask)
-    return p_ml, p_me
-
-
-def graph_logits(graph_embeds: Array, masking_func: Callable[[Array], Array]):
-    assert graph_embeds.ndim == 2, "graph embeddings must be 2D"
-    pa1 = softmax(masking_func(graph_embeds))
-    return pa1
-
-
-def node_masking(node_mask: Mask, entropy: Callable[[Array], Array]):
-    assert node_mask.ndim == 1, "node mask must be 1D"
-    n_ml = mask_logits(node_mask)
-    n_me = entropy(node_mask)
-    return n_ml, n_me
-
-
-def node_logits(
-    node_predicate_logits: Array,
-    n_ml: Callable[[Array], Array],
-    node_logits_f: Callable[[Array], Callable[[Array], Array]],
-) -> Callable[[Array], Array]:
-    assert node_predicate_logits.ndim == 2, "node embeddings must be 2D"
-
-    return lambda predicate_action: n_ml(
-        node_logits_f(node_predicate_logits)(predicate_action)
-    )
-
-
 def sample_action_then_node(
     key: Array,
     action_logits: Array,
@@ -384,6 +354,7 @@ def sample_action_then_node(
     predicate_mask: Mask,
     node_mask: Mask,
     batch: BatchIdx,
+    n_nodes: Array,
     deterministic: bool = False,
 ) -> tuple[Array, Array, Array, Array, Array]:
     assert predicate_mask.ndim == 2, "action mask must be 2D"
@@ -396,7 +367,7 @@ def sample_action_then_node(
     entropy = masked_entropy(num_graphs)
     p_me = entropy(predicate_mask)
     n_me = entropy(node_mask)
-    ds = data_starts(batch)
+    ds = data_starts(n_nodes)
 
     masked_action_logits = mask_logits(predicate_mask)(action_logits)
     pa1 = softmax(masked_action_logits)
@@ -411,7 +382,7 @@ def sample_action_then_node(
 
     entropy2 = n_me(pa2)
 
-    node_action, key = sample_node(batch)(masked_node_logits)(key)
+    node_action, key = sample_node(n_nodes)(masked_node_logits)(key)
 
     a1_p = gather(pa1, predicate_action)
     a2_p = segmented_gather(pa2)(ds)(node_action)
@@ -447,6 +418,7 @@ def sample_node_then_action(
     predicate_mask: Mask,
     node_mask: Mask,
     batch: BatchIdx,
+    n_nodes: Array,
     deterministic: bool = False,
 ) -> tuple[Array, Array, Array, Array, Array, Array]:
     assert node_mask.ndim == 1, "node mask must be 1D"
@@ -457,17 +429,17 @@ def sample_node_then_action(
 
     entropy = masked_entropy(num_graphs)
     node_probs_f = node_probs(batch)
+    ds = data_starts(n_nodes)
 
     masked_node_logits = mask_logits(node_mask)(node_logits)
     pa1 = node_probs_f(masked_node_logits)
     entropy1 = entropy(node_mask)(pa1)
     node_action, key = (
-        sample_node(batch)(masked_node_logits)(key)
+        sample_node(n_nodes)(masked_node_logits)(key)
         if not deterministic
-        else select_node(batch)(masked_node_logits)
+        else select_node(n_nodes)(masked_node_logits)
     )
 
-    ds = data_starts(batch)
     a1_p = segmented_gather(pa1)(ds)(node_action)
     # probabilities of the selected nodes
 
@@ -519,6 +491,7 @@ def eval_action_and_node(
     predicate_mask: Mask,
     node_mask: Mask,
     batch: BatchIdx,
+    n_nodes: Array,
 ) -> tuple[Array, Array]:
     assert predicate_mask.ndim == 2, "action mask must be 2D"
     assert node_mask.ndim == 1, "node mask must be 2D"
@@ -530,6 +503,7 @@ def eval_action_and_node(
     a2 = eval_action[:, 1]
 
     entropy = masked_entropy(num_graphs)
+    ds = data_starts(n_nodes)
 
     p_ml = mask_logits(predicate_mask)
     p_me = entropy(predicate_mask)
@@ -547,7 +521,6 @@ def eval_action_and_node(
     masked_node_logits = n_ml(node_logits)
     pa2 = node_prob(masked_node_logits)
     entropy2 = n_me(pa2)
-    ds = data_starts(batch)
     a2_p = segmented_gather(pa2)(ds)(a2)
     a2_p = where(
         predicate_action.squeeze() == 0, ones_like(a2_p), a2_p
@@ -571,6 +544,7 @@ def eval_node_then_action(
     predicate_mask: Mask,
     node_mask: Mask,
     batch: BatchIdx,
+    n_nodes: Array,
 ) -> tuple[Array, Array]:
     node_action = eval_action[:, 1]  # .reshape(-1, 1)
     predicate_action = eval_action[:, 0]  # .reshape(-1, 1)
@@ -590,6 +564,7 @@ def eval_node_then_action(
 
     n_ml = mask_logits(node_mask)
     n_me = entropy(node_mask)
+    ds = data_starts(n_nodes)
 
     node_prob = node_probs(batch)
 
@@ -597,7 +572,6 @@ def eval_node_then_action(
     p_node = node_prob(masked_node_logits)
     entropy1 = n_me(p_node)
 
-    ds = data_starts(batch)
     a1_p = segmented_gather(p_node)(ds)(node_action)
     # probabilities of the selected nodes
 
