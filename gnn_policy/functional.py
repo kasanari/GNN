@@ -154,7 +154,7 @@ def entropy(p: Tensor, batch_size: int) -> Tensor:
 @th.jit.script
 def masked_entropy(p: Tensor, mask: Tensor, batch_size: int) -> Tensor:
     """Zero probability elements are masked out"""
-    unmasked_probs = p[mask]
+    unmasked_probs = where(mask, p, ones_like(p))
     return entropy(unmasked_probs, batch_size)
 
 
