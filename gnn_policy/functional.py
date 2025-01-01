@@ -10,7 +10,6 @@ from torch import (
     where,
     roll,
     cumsum,
-    unique,
     tensor,
     cat,
     prod,
@@ -56,8 +55,8 @@ def get_start_indices(splits: Tensor) -> Tensor:
 
 
 @th.jit.script
-def data_splits_and_starts(batch: Tensor) -> tuple[list[int], Tensor]:
-    data_splits: Tensor = unique(batch, return_counts=True)[1]  # nodes per graph
+def data_splits_and_starts(n_nodes: Tensor) -> tuple[list[int], Tensor]:
+    data_splits: Tensor = n_nodes  # number of nodes in each graph
     data_starts = get_start_indices(data_splits)  # start index of each graph
     # lst_lens = Tensor([len(x.mask) for x in batch.to_data_list()], device=device)
     # mask_starts = data_starts.repeat_interleave(lst_lens)
@@ -85,9 +84,9 @@ def node_probs(x: Tensor, mask: Tensor, batch: Tensor):
 
 @th.jit.script
 def action_given_node_probs(
-    node_embeds: Tensor, node: Tensor, mask: Tensor, batch: Tensor
+    node_embeds: Tensor, node: Tensor, mask: Tensor, n_nodes: Tensor
 ) -> Tensor:
-    _, data_starts = data_splits_and_starts(batch)
+    _, data_starts = data_splits_and_starts(n_nodes)
     x = segmented_gather(node_embeds, node.squeeze(), data_starts)
     p = masked_softmax(x, mask)
     return p
@@ -160,9 +159,9 @@ def masked_entropy(p: Tensor, mask: Tensor, batch_size: int) -> Tensor:
 
 @th.jit.script
 def sample_node(
-    p: Tensor, batch: Tensor, deterministic: bool = False
+    p: Tensor, n_nodes: Tensor, deterministic: bool = False
 ) -> tuple[Tensor, Tensor]:
-    data_splits, data_starts = data_splits_and_starts(batch)
+    data_splits, data_starts = data_splits_and_starts(n_nodes)
     a = (
         segmented_sample(p, data_splits)
         if not deterministic
@@ -189,6 +188,7 @@ def sample_action_and_node(
     predicate_mask: Tensor,
     node_mask: Tensor,
     batch: Tensor,
+    n_nodes: Tensor,
     deterministic: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
     assert predicate_mask.dim() == 2, "action mask must be 2D"
@@ -205,7 +205,7 @@ def sample_action_and_node(
 
     pa2 = node_probs(node_logits, node_mask, batch)
     entropy2 = masked_entropy(pa2, node_mask, num_graphs)
-    a2, data_starts = sample_node(pa2, batch, deterministic)
+    a2, data_starts = sample_node(pa2, n_nodes, deterministic)
     a2_p = segmented_gather(pa2, a2, data_starts)
 
     tot_log_prob = log(a1_p * a2_p)
@@ -234,6 +234,7 @@ def sample_action_then_node(
     predicate_mask: Tensor,
     node_mask: Tensor,
     batch: Tensor,
+    n_nodes: Tensor,
     deterministic: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
     assert predicate_mask.dim() == 2, "action mask must be 2D"
@@ -254,7 +255,7 @@ def sample_action_then_node(
 
     node_action, data_starts = sample_node(
         pa2,
-        batch,
+        n_nodes,
         deterministic=deterministic,
     )
 
@@ -289,16 +290,21 @@ def sample_node_then_action(
     predicate_mask: Tensor,
     node_mask: Tensor,
     batch: Tensor,
+    n_nodes: Tensor,
     deterministic: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
     assert node_mask.dim() == 1, "node mask must be 1D"
-    assert node_logits.dim() == 1, "node logits must be 1D"
-    assert predicate_mask.dim() == 2, "action mask must be 2D"
+    assert node_logits.dim() == 1, "node logits must be 1D, was {}".format(
+        node_logits.shape
+    )
+    assert predicate_mask.dim() == 2, "action mask must be 2D, was {}".format(
+        predicate_mask.shape
+    )
     assert node_predicate_embeds.dim() == 2, "node action embeddings must be 2D"
     num_graphs = predicate_mask.shape[0]
     pa1 = node_probs(node_logits, node_mask, batch)
     entropy1 = masked_entropy(pa1, node_mask, num_graphs)
-    node_action, data_starts = sample_node(pa1, batch, deterministic)
+    node_action, data_starts = sample_node(pa1, n_nodes, deterministic)
 
     a1_p = segmented_gather(
         pa1, node_action, data_starts
@@ -307,7 +313,7 @@ def sample_node_then_action(
     assert not (a1_p == 0).any(), "node probabilities must be non-zero"
 
     pa2 = action_given_node_probs(
-        node_predicate_embeds, node_action, predicate_mask, batch
+        node_predicate_embeds, node_action, predicate_mask, n_nodes
     )
     entropy2 = masked_entropy(pa2, predicate_mask, num_graphs)
     predicate_action = sample_action(pa2, deterministic)
@@ -347,9 +353,9 @@ def segmented_prod(tnsr: Tensor, splits: list[int]):
 
 @th.jit.script
 def sample_node_set(
-    logits: Tensor, mask: Tensor, batch: Tensor
+    logits: Tensor, mask: Tensor, n_nodes: Tensor
 ) -> tuple[list[Tensor], Tensor]:
-    data_splits, _ = data_splits_and_starts(batch)
+    data_splits, _ = data_splits_and_starts(n_nodes)
     a0_sel = logits.bernoulli().to(th.bool)
     af_selection = segmented_nonzero(a0_sel, data_splits)
 
@@ -397,6 +403,7 @@ def eval_action_and_node(
     predicate_mask: Tensor,
     node_mask: Tensor,
     batch: Tensor,
+    n_nodes: Tensor,
 ) -> tuple[Tensor, Tensor]:
     assert predicate_mask.dim() == 2, "action mask must be 2D"
     assert node_mask.dim() == 1, "node mask must be 2D"
@@ -412,7 +419,7 @@ def eval_action_and_node(
     a1_p = gather(pa1, predicate_action)
     pa2 = node_probs(node_logits, node_mask, batch)
     entropy2 = masked_entropy(pa2, node_mask, num_graphs)
-    _, data_starts = data_splits_and_starts(batch)
+    _, data_starts = data_splits_and_starts(n_nodes)
     a2_p = segmented_gather(pa2, a2, data_starts)
     tot_log_prob = log(a1_p * a2_p + 1e-9)
     tot_entropy = entropy1 + entropy2  # H(X, Y) = H(X) + H(Y|X)
@@ -434,6 +441,7 @@ def eval_node_then_action(
     predicate_mask: Tensor,
     node_mask: Tensor,
     batch: Tensor,
+    n_nodes: Tensor,
 ) -> tuple[Tensor, Tensor]:
     node_action = eval_action[:, 1].long().view(-1, 1)
     predicate_action = eval_action[:, 0].long().view(-1, 1)
@@ -451,13 +459,13 @@ def eval_node_then_action(
     p_node = node_probs(node_logits, node_mask, batch)
     entropy1 = masked_entropy(p_node, node_mask, num_graphs)
 
-    _, data_starts = data_splits_and_starts(batch)
+    _, data_starts = data_splits_and_starts(n_nodes)
     a1_p = segmented_gather(
         p_node, node_action, data_starts
     )  # probabilities of the selected nodes
 
     pa2 = action_given_node_probs(
-        node_predicate_embeds, node_action, predicate_mask, batch
+        node_predicate_embeds, node_action, predicate_mask, n_nodes
     )
     entropy2 = masked_entropy(pa2, predicate_mask, num_graphs)
 
@@ -482,6 +490,7 @@ def eval_action_then_node(
     predicate_mask: Tensor,
     node_mask: Tensor,
     batch: Tensor,
+    n_nodes: Tensor,
 ) -> tuple[Tensor, Tensor]:
     node_action = eval_action[:, 1].long().view(-1, 1)
     predicate_action = eval_action[:, 0].long().view(-1, 1)
@@ -505,7 +514,7 @@ def eval_action_then_node(
 
     entropy2 = masked_entropy(pa2, node_mask, num_graphs)
 
-    _, data_starts = data_splits_and_starts(batch)
+    _, data_starts = data_splits_and_starts(n_nodes)
 
     a1_p = gather(pa1, predicate_action)
     a2_p = segmented_gather(pa2, node_action, data_starts)
