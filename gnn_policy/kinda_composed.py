@@ -10,7 +10,6 @@ from jax.numpy import (
     where,
     roll,
     cumsum,
-    unique,
     concatenate,
     prod,
     ones_like,
@@ -42,7 +41,7 @@ from jax.ops import segment_max, segment_sum
 def segment_softmax(
     logits: jnp.ndarray,
     segment_ids: jnp.ndarray,
-    num_segments: int | None = None,
+    num_segments: int,
     indices_are_sorted: bool = False,
     unique_indices: bool = False,
 ) -> Array:
@@ -329,7 +328,6 @@ def sample_action_and_node(
     )
 
 
-# @partial(jit, static_argnames=("num_graphs",))
 def eval_action_then_node(
     eval_action: Array,
     graph_embeds: Array,
@@ -386,7 +384,6 @@ def eval_action_then_node(
     )
 
 
-# @partial(jit, static_argnames=("n_graphs",))
 def sample_action_then_node(
     key: Array,
     action_logits: Array,
