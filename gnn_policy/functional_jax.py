@@ -584,6 +584,7 @@ def eval_action_then_node(
     predicate_mask: Array,
     node_mask: Array,
     batch: Array,
+    _: Array,
     n_graphs: int,
 ) -> tuple[Array, Array]:
     node_action = eval_action[:, 1]  # .long().view(-1, 1)

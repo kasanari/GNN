@@ -532,13 +532,13 @@ def eval_action_and_node(
     node_mask: Mask,
     batch: BatchIdx,
     n_nodes: Array,
+    num_graphs: int,
 ) -> tuple[Array, Array]:
     assert predicate_mask.ndim == 2, "action mask must be 2D"
     assert node_mask.ndim == 1, "node mask must be 2D"
     assert node_logits.ndim == 1, "node embeddings must be 2D"
     assert graph_embeds.ndim == 2, "graph embeddings must be 2D"
 
-    num_graphs = np.max(batch) + 1
     predicate_action = eval_action[:, 0]
     a2 = eval_action[:, 1]
 
@@ -585,6 +585,7 @@ def eval_node_then_action(
     node_mask: Mask,
     batch: BatchIdx,
     n_nodes: Array,
+    n_graphs: int,
 ) -> tuple[Array, Array]:
     node_action = eval_action[:, 1]  # .reshape(-1, 1)
     predicate_action = eval_action[:, 0]  # .reshape(-1, 1)
@@ -597,7 +598,7 @@ def eval_node_then_action(
     assert predicate_action.ndim == 1
     # assert predicate_action.shape[-1] == 1
 
-    num_graphs = np.max(batch) + 1
+    num_graphs = n_graphs
     entropy = masked_entropy(num_graphs)
 
     p_me = entropy(predicate_mask)
