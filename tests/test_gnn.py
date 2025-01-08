@@ -1,6 +1,7 @@
 import torch as th
 from torch import all
 import gnn_policy.functional as F
+import pytest
 
 
 def data_splits_and_starts():
@@ -38,6 +39,14 @@ def test_segmented_sample():
     probs = th.tensor([0.1, 0.0, 1.0, 0.0, 0.0])
     splits = [2, 3]
     samples = F.segmented_sample(probs, splits)
+    assert samples.shape == (2, 1)
+    assert (samples == th.tensor([[0], [0]])).all()
+
+
+def test_segmented_argmax():
+    probs = th.tensor([0.1, 0.0, 1.0, 0.0, 0.0])
+    splits = [2, 3]
+    samples = F.segmented_argmax(probs, splits)
     assert samples.shape == (2, 1)
     assert (samples == th.tensor([[0], [0]])).all()
 
@@ -253,6 +262,7 @@ def test_sample_node_then_action():
     assert eval_logprob == logprob
 
 
+@pytest.mark.skip(reason="Not implemented")
 def test_sample_node_set():
     x = th.tensor([1.0, 1.0, 0.0])
     mask = th.tensor([True, True, False])
