@@ -472,6 +472,7 @@ def sample_action_then_node(
         a,
         tot_log_prob,
         tot_entropy,
+        key,
         pa1,
         pa2,
     )
