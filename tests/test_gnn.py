@@ -14,22 +14,26 @@ def data_splits_and_starts():
 
 
 def test_masked_segmented_softmax():
-    energies = th.tensor([50, 50, 20, 100, 20])  # 100 will be masked
+    logits = th.tensor([50, 50, 20, 100, 20])  # 100 will be masked
     mask = th.tensor([True, True, True, False, True])
     batch_ind = th.tensor([0, 0, 1, 1, 1])
-    probs = F.masked_segmented_softmax(energies, mask, batch_ind)
+    n_graphs = 2
+    masked_logits = F.mask_logits(logits, mask)
+    probs = F.segmented_softmax(masked_logits, batch_ind, n_graphs)
     assert all(probs == th.tensor([0.5, 0.5, 0.5, 0.0, 0.5]))
 
 
 def test_masked_softmax():
     x = th.tensor([50, 0, 50])
     mask = th.tensor([True, False, True])
-    probs = F.masked_softmax(x, mask)
+    masked_x = F.mask_logits(x, mask)
+    probs = F.softmax(masked_x)
     assert (probs == th.tensor([0.5, 0.0, 0.5])).all()
 
     x = th.tensor([[50, 0, 50], [0, 50, 0], [20, 20, 20]])
     mask = th.tensor([[True, False, True], [False, True, False], [True, True, True]])
-    probs = F.masked_softmax(x, mask)
+    masked_x = F.mask_logits(x, mask)
+    probs = F.softmax(masked_x)
     assert (
         probs == th.tensor([[0.5, 0.0, 0.5], [0.0, 1.0, 0.0], [1 / 3, 1 / 3, 1 / 3]])
     ).all()
@@ -60,9 +64,10 @@ def test_segmented_gather():
 
 
 def test_graph_action():
-    energies = th.tensor([[50, 0, 0], [0, 50, 0], [100, 0, 50]])
+    logits = th.tensor([[50, 0, 0], [0, 50, 0], [100, 0, 50]])
     mask = th.tensor([[True, True, True], [True, True, True], [False, True, True]])
-    p = F.action_probs(energies, mask)
+    masked_logits = F.mask_logits(logits, mask)
+    p = F.softmax(masked_logits)
     a = F.sample_action(p)
     assert a.shape == (3, 1)
     assert (a == th.tensor([[0], [1], [2]])).all()
@@ -77,7 +82,9 @@ def test_sample_node():
     mask = th.tensor([True, True, True, True, True, False])
     batch_idx = th.tensor([0, 0, 0, 1, 1, 1])
     n_nodes = th.tensor([3, 3])
-    p = F.node_probs(energies, mask, batch_idx)
+    n_graphs = 2
+    masked_logits = F.mask_logits(energies, mask)
+    p = F.node_probs(masked_logits, batch_idx, n_graphs)
     a, data_starts = F.sample_node(p, n_nodes)
     assert (data_starts == th.tensor([0, 3])).all()
     assert (a == th.tensor([[0], [1]])).all()
@@ -116,7 +123,9 @@ def test_sample_action_given_node():
     node = th.tensor([[1]])
     batch = th.tensor([0, 0, 0])
     n_nodes = th.tensor([3])
-    p = F.action_given_node_probs(x, node, action_mask, n_nodes)
+    action_logits = F.action_logits_given_node(x, node, n_nodes)
+    masked_action_logits = F.mask_logits(action_logits, action_mask)
+    p = F.softmax(masked_action_logits)
     a = F.sample_action(p)
     assert (a == th.tensor([[1]])).all()
 
@@ -125,7 +134,9 @@ def test_sample_action_given_node():
     node = th.tensor([[1, 0]])
     batch = th.tensor([0, 0, 1])
     n_nodes = th.tensor([2, 1])
-    p = F.action_given_node_probs(x, node, action_mask, n_nodes)
+    action_logits = F.action_logits_given_node(x, node, n_nodes)
+    masked_action_logits = F.mask_logits(action_logits, action_mask)
+    p = F.softmax(masked_action_logits)
     a = F.sample_action(p)
     assert (a == th.tensor([[1], [1]])).all()
 
@@ -136,8 +147,11 @@ def test_sample_node_given_action():
     action = th.tensor([[1]])
     batch = th.tensor([0, 0, 0])
     n_nodes = th.tensor([3])
+    n_graphs = 1
 
-    p = F.node_given_action_probs(x, action, batch, node_mask)
+    node_logits = F.node_logits_given_action(x, action, batch)
+    masked_node_logits = F.mask_logits(node_logits, node_mask)
+    p = F.segmented_softmax(masked_node_logits, batch, n_graphs)
 
     a, _ = F.sample_node(
         p,
@@ -150,8 +164,11 @@ def test_sample_node_given_action():
     action = th.tensor([[1], [0]])
     batch = th.tensor([0, 0, 1, 1, 1])
     n_nodes = th.tensor([2, 3])
+    n_graphs = 2
 
-    p = F.node_given_action_probs(x, action, batch, node_mask)
+    node_logits = F.node_logits_given_action(x, action, batch)
+    masked_node_logits = F.mask_logits(node_logits, node_mask)
+    p = F.segmented_softmax(masked_node_logits, batch, n_graphs)
 
     a, _ = F.sample_node(
         p,
