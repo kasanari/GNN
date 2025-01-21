@@ -345,7 +345,9 @@ def sample_node_then_action(
 
     a2_p = gather(pa2, predicate_action)
 
-    tot_log_prob = log(a1_p * a2_p)
+    a1_p = where(predicate_action.squeeze() == 0, ones_like(a1_p), a1_p)
+
+    tot_log_prob = log(a1_p * a2_p + 1e-9)
     tot_entropy = entropy1 + entropy2  # H(X, Y) = H(X) + H(Y|X)
 
     a = concat_actions(predicate_action=predicate_action, object_action=node_action)
@@ -499,7 +501,9 @@ def eval_node_then_action(
 
     a2_p = gather(pa2, predicate_action)
 
-    tot_log_prob = log(a1_p * a2_p)
+    a1_p = where(predicate_action.squeeze() == 0, ones_like(a1_p), a1_p)
+
+    tot_log_prob = log(a1_p * a2_p + 1e-9)
     tot_entropy = entropy1 + entropy2  # H(X, Y) = H(X) + H(Y|X)
 
     assert not (a1_p == 0).any(), "node probabilities must be non-zero"
