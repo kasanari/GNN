@@ -211,29 +211,40 @@ def test_sample_action_and_node():
     assert eval_logprob == logprob
 
 
-def test_sample_action_then_node():
-    x1 = th.tensor([[10, 100]])
-    x2 = th.tensor([[10, 0], [0, 10], [100, 0]])
+@pytest.mark.parametrize("deterministic", [True, False])
+def test_sample_action_then_node(deterministic: bool):
+    action_logits = th.tensor([[10, 100]], dtype=th.float32)  # ln(p(a))
+    node_given_action_logits = th.tensor(
+        [[20, 0], [0, 10], [100, 0]], dtype=th.float32
+    )  # ln(p(n | a))
+    node_logits = (action_logits + node_given_action_logits).sum(-1)
+    action_given_node_logits = th.tensor(
+        [[10, 100], [0, 0], [0, 0]], dtype=th.float32
+    )  # ln(p(a | n))
+
     mask1 = th.tensor([[True, False]])
     mask2 = th.tensor([True, True, False])
     batch = th.tensor([0, 0, 0])
     n_nodes = th.tensor([3])
 
     a, logprob, h, *_ = F.sample_action_then_node(
-        x1,
-        x2,
+        node_logits,
+        action_given_node_logits,
+        node_given_action_logits,
         mask1,
         mask2,
         batch,
         n_nodes,
+        deterministic=deterministic,
     )
     assert (a == th.tensor([[0, 0]])).all()
     assert logprob.shape == (1,)
 
-    eval_logprob, h = F.eval_action_then_node(
+    eval_logprob, h, *_ = F.eval_action_then_node(
         a,
-        x1,
-        x2,
+        node_logits,
+        action_given_node_logits,
+        node_given_action_logits,
         mask1,
         mask2,
         batch,
@@ -245,29 +256,31 @@ def test_sample_action_then_node():
     assert eval_logprob == logprob
 
 
-def test_sample_node_then_action():
-    x1 = th.tensor([10, 100, 0])
-    x2 = th.tensor([[10, 100], [0, 10], [100, 0]])
+@pytest.mark.parametrize("deterministic", [True, False])
+def test_sample_node_then_action(deterministic: bool):
+    node_logits = th.tensor([10, 100, 0])
+    action_given_node_logits = th.tensor([[10, 100], [0, 10], [100, 0]])
     mask1 = th.tensor([True, False, True])
     mask2 = th.tensor([[True, False]])
     batch = th.tensor([0, 0, 0])
     n_nodes = th.tensor([3])
 
     a, logprob, h, *_ = F.sample_node_then_action(
-        x2,
-        x1,
+        action_given_node_logits,
+        node_logits,
         mask2,
         mask1,
         batch,
         n_nodes,
+        deterministic=deterministic,
     )
     assert (a == th.tensor([[0, 0]])).all()
     assert logprob.shape == (1,)
 
-    eval_logprob, h = F.eval_node_then_action(
+    eval_logprob, h, *_ = F.eval_node_then_action(
         a,
-        x2,
-        x1,
+        action_given_node_logits,
+        node_logits,
         mask2,
         mask1,
         batch,

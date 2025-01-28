@@ -227,7 +227,7 @@ def sample_action_and_node(
     assert node_logits.dim() == 1, "node embeddings must be 2D"
     assert graph_embeds.dim() == 2, "graph embeddings must be 2D"
 
-    num_graphs = predicate_mask.shape[0]
+    num_graphs = n_nodes.shape[0]
 
     masked_action_logits = mask_logits(graph_embeds, predicate_mask)
     p_actions = softmax(masked_action_logits)
@@ -262,8 +262,9 @@ def sample_action_and_node(
 
 @th.jit.script
 def sample_action_then_node(
-    action_logits: Tensor,
-    node_predicate_logits: Tensor,
+    node_logits: Tensor,
+    action_given_node_logits: Tensor,
+    node_given_action_logits: Tensor,
     predicate_mask: Tensor,
     node_mask: Tensor,
     batch: Tensor,
@@ -272,17 +273,22 @@ def sample_action_then_node(
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
     assert predicate_mask.dim() == 2, "action mask must be 2D"
     assert node_mask.dim() == 1, "node mask must be 1D"
-    assert node_predicate_logits.dim() == 2, "node embeddings must be 2D"
-    assert action_logits.dim() == 2, "graph embeddings must be 2D"
-    assert action_logits.shape[1] == predicate_mask.shape[1]
-    num_graphs = predicate_mask.shape[0]
+    assert node_given_action_logits.dim() == 2, "node embeddings must be 2D"
+    assert node_logits.dim() == 1, "graph embeddings must be 2D"
+    # assert node_logits.shape[1] == predicate_mask.shape[1]
+    num_graphs = n_nodes.shape[0]
 
-    p_actions = softmax(mask_logits(action_logits, predicate_mask))
+    p_actions = marginalize(
+        mask_logits(node_logits, node_mask),
+        mask_logits(action_given_node_logits, predicate_mask),
+        batch,
+        num_graphs,
+    )
     predicate_action = sample_action(p_actions, deterministic)
 
     p_nodes = node_probs(
         mask_logits(
-            node_logits_given_action(node_predicate_logits, predicate_action, batch),
+            node_logits_given_action(node_given_action_logits, predicate_action, batch),
             node_mask,
         ),
         batch,
@@ -308,9 +314,9 @@ def sample_action_then_node(
 
     a = concat_actions(predicate_action=predicate_action, object_action=node_action)
 
-    assert tot_log_prob.shape[0] == predicate_mask.shape[0]
+    assert tot_log_prob.shape[0] == num_graphs
     assert tot_entropy.dim() == 0, "entropy must be a scalar"
-    assert a.shape[0] == predicate_mask.shape[0]
+    assert a.shape[0] == num_graphs
     assert a.shape[1] == 2, "action must have two components, was {}".format(a.shape)
 
     return (
@@ -369,9 +375,9 @@ def sample_node_then_action(
 
     a = concat_actions(predicate_action=a_action, object_action=a_node)
 
-    assert tot_log_prob.shape[0] == predicate_mask.shape[0]
+    assert tot_log_prob.shape[0] == num_graphs
     assert tot_entropy.dim() == 0, "entropy must be a scalar"
-    assert a.shape[0] == predicate_mask.shape[0]
+    assert a.shape[0] == num_graphs
     assert a.shape[1] == 2, f"action must have two components, was {a.shape}"
 
     assert not tot_log_prob.isinf().any()
@@ -486,7 +492,7 @@ def eval_node_then_action(
     node_mask: Tensor,
     batch: Tensor,
     n_nodes: Tensor,
-) -> tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     node_action = eval_action[:, 1].long().view(-1, 1)
     predicate_action = eval_action[:, 0].long().view(-1, 1)
 
@@ -499,8 +505,9 @@ def eval_node_then_action(
     assert predicate_action.dim() == 2
     assert predicate_action.shape[-1] == 1
 
-    num_graphs = predicate_mask.shape[0]
-    p_nodes = node_probs(mask_logits(node_logits, node_mask), batch, num_graphs)
+    num_graphs = n_nodes.shape[0]
+    masked_node_logits = mask_logits(node_logits, node_mask)
+    p_nodes = node_probs(masked_node_logits, batch, num_graphs)
 
     _, data_starts = data_splits_and_starts(n_nodes)
     p_node = segmented_gather(
@@ -528,37 +535,43 @@ def eval_node_then_action(
     assert tot_entropy.dim() == 0, "entropy must be a scalar"
     assert not tot_log_prob.isinf().any()
 
-    return (tot_log_prob, tot_entropy)
+    return (tot_log_prob, tot_entropy, p_actions, p_nodes)
 
 
 @th.jit.script
 def eval_action_then_node(
     eval_action: Tensor,
-    graph_embeds: Tensor,
-    node_predicate_embeds: Tensor,
+    node_logits: Tensor,
+    action_given_node_logits: Tensor,
+    node_given_action_logits: Tensor,
     predicate_mask: Tensor,
     node_mask: Tensor,
     batch: Tensor,
     n_nodes: Tensor,
-) -> tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     node_action = eval_action[:, 1].long().view(-1, 1)
     predicate_action = eval_action[:, 0].long().view(-1, 1)
     assert predicate_mask.dim() == 2, "action mask must be 2D"
     assert node_mask.dim() == 1, "node mask must be 1D"
-    assert node_predicate_embeds.dim() == 2, "node embeddings must be 2D"
-    assert graph_embeds.dim() == 2, "graph embeddings must be 2D"
+    assert node_given_action_logits.dim() == 2, "action|node embeddings must be 2D"
+    assert node_given_action_logits.dim() == 2, "node|action embeddings must be 2D"
     assert node_action.dim() == 2
     assert node_action.shape[-1] == 1
     assert predicate_action.dim() == 2
     assert predicate_action.shape[-1] == 1
 
-    num_graphs = predicate_mask.shape[0]
+    num_graphs = n_nodes.shape[0]
 
-    p_actions = softmax(mask_logits(graph_embeds, predicate_mask))
+    p_actions = marginalize(
+        mask_logits(node_logits, node_mask),
+        mask_logits(action_given_node_logits, predicate_mask),
+        batch,
+        num_graphs,
+    )
 
     p_nodes = node_probs(
         mask_logits(
-            node_logits_given_action(node_predicate_embeds, predicate_action, batch),
+            node_logits_given_action(node_given_action_logits, predicate_action, batch),
             node_mask,
         ),
         batch,
@@ -578,10 +591,12 @@ def eval_action_then_node(
     ) + masked_entropy(p_nodes, node_mask, num_graphs)  # H(X, Y) = H(X) + H(Y|X)
 
     # assert not (a2_p == 0).any(), "node probabilities must be non-zero"
-    assert tot_log_prob.shape[0] == predicate_mask.shape[0]
+    assert tot_log_prob.shape[0] == num_graphs
     assert tot_entropy.dim() == 0, "entropy must be a scalar"
 
     return (
         tot_log_prob,
         tot_entropy,
+        p_actions,
+        p_nodes,
     )
