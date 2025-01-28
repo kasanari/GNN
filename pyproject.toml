@@ -3,7 +3,5 @@ name = "gnn_policy"
 version = "0.0.1"
 dependencies = [
 	"torch",
-	"gymnasium",
-	"torch-geometric",
-	"stable-baselines3",
+	"torch_scatter",
 ]
