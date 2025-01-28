@@ -20,6 +20,19 @@ from torch import (
 
 
 @th.jit.script
+def segment_sum(x: Tensor, index: Tensor, num_segments: int, dim: int = 0) -> Tensor:
+    return scatter(x, index, dim, dim_size=num_segments, reduce="sum")
+
+
+@th.jit.script
+def softmax(x: Tensor) -> Tensor:
+    probs = nn.functional.softmax(x, -1)
+    assert not (probs.isnan()).any()
+    assert not (probs.isinf()).any()
+    return probs
+
+
+@th.jit.script
 def segment_softmax(
     src: Tensor,
     index: Tensor,
@@ -40,14 +53,6 @@ def mask_logits(logits: Tensor, mask: Tensor) -> Tensor:
     infty = tensor(-1e9, device=logits.device)
     masked_logits = where(mask, logits, infty)
     return masked_logits
-
-
-@th.jit.script
-def softmax(x: Tensor) -> Tensor:
-    probs = nn.functional.softmax(x, -1)
-    assert not (probs.isnan()).any()
-    assert not (probs.isinf()).any()
-    return probs
 
 
 @th.jit.script
