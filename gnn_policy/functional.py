@@ -54,6 +54,22 @@ def segment_softmax(
 
 
 @th.jit.script
+def marginalize(
+    ln_p_x: Tensor,
+    ln_p_y__x: Tensor,
+    batch_idx: Tensor,
+    num_segments: int,
+) -> Tensor:
+    # derive p(y) from (sparse) p(x) and (sparse) p(y|x)
+    # apply chain rule: p(x, y) = p(y|x) * p(x)
+    # then marginalize p(x, y) over x to get p(y)
+    x = segment_softmax(ln_p_x, batch_idx, num_segments)  # p(n)
+    x = x.unsqueeze(-1) * softmax(ln_p_y__x)  # p(a|n) * p(n) = p(a, n)
+    x = segment_sum(x, batch_idx, num_segments)  # sum over nodes to get p(a)
+    return x
+
+
+@th.jit.script
 def mask_logits(logits: Tensor, mask: Tensor) -> Tensor:
     infty = tensor(-1e9, device=logits.device)
     masked_logits = where(mask, logits, infty)
