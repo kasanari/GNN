@@ -366,7 +366,7 @@ def sample_node_then_action(
 
     p_action = gather(p_actions, a_action)
 
-    p_node = where(a_action.squeeze() == 0, ones_like(p_node), p_node)
+    # p_node = where(a_action.squeeze() == 0, ones_like(p_node), p_node)
 
     tot_log_prob = log(p_node * p_action + 1e-9)
     tot_entropy = masked_entropy(p_nodes, node_mask, num_graphs) + masked_entropy(
@@ -523,7 +523,7 @@ def eval_node_then_action(
 
     p_action = gather(p_actions, predicate_action)
 
-    p_node = where(predicate_action.squeeze() == 0, ones_like(p_node), p_node)
+    # p_node = where(predicate_action.squeeze() == 0, ones_like(p_node), p_node)
 
     tot_log_prob = log(p_node * p_action + 1e-9)
     tot_entropy = masked_entropy(p_nodes, node_mask, num_graphs) + masked_entropy(
