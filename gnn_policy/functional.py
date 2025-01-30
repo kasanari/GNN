@@ -25,6 +25,11 @@ def segment_sum(x: Tensor, index: Tensor, num_segments: int, dim: int = 0) -> Te
 
 
 @th.jit.script
+def segment_mean(x: Tensor, index: Tensor, num_segments: int, dim: int = 0) -> Tensor:
+    return scatter(x, index, dim, dim_size=num_segments, reduce="mean")
+
+
+@th.jit.script
 def softmax(x: Tensor) -> Tensor:
     probs = nn.functional.softmax(x, -1)
     assert not (probs.isnan()).any()
