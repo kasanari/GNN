@@ -280,7 +280,7 @@ def sample_action_then_node(
 
     p_actions = marginalize(
         mask_logits(node_logits, node_mask),
-        mask_logits(action_given_node_logits, predicate_mask),
+        action_given_node_logits,  # TODO mask
         batch,
         num_graphs,
     )
@@ -564,7 +564,7 @@ def eval_action_then_node(
 
     p_actions = marginalize(
         mask_logits(node_logits, node_mask),
-        mask_logits(action_given_node_logits, predicate_mask),
+        action_given_node_logits,  # TODO mask
         batch,
         num_graphs,
     )
