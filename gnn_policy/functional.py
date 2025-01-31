@@ -19,17 +19,17 @@ from torch import (
 )
 
 
-@th.jit.script
+# @th.jit.script
 def segment_sum(x: Tensor, index: Tensor, num_segments: int, dim: int = 0) -> Tensor:
     return scatter(x, index, dim, dim_size=num_segments, reduce="sum")
 
 
-@th.jit.script
+# @th.jit.script
 def segment_mean(x: Tensor, index: Tensor, num_segments: int, dim: int = 0) -> Tensor:
     return scatter(x, index, dim, dim_size=num_segments, reduce="mean")
 
 
-@th.jit.script
+# @th.jit.script
 def softmax(x: Tensor) -> Tensor:
     probs = nn.functional.softmax(x, -1)
     assert not (probs.isnan()).any()
@@ -37,7 +37,7 @@ def softmax(x: Tensor) -> Tensor:
     return probs
 
 
-@th.jit.script
+# @th.jit.script
 def segment_softmax(
     src: Tensor,
     index: Tensor,
@@ -53,7 +53,7 @@ def segment_softmax(
     return out / out_sum
 
 
-@th.jit.script
+# @th.jit.script
 def marginalize(
     ln_p_x: Tensor,
     ln_p_y__x: Tensor,
@@ -69,31 +69,31 @@ def marginalize(
     return x
 
 
-@th.jit.script
+# @th.jit.script
 def mask_logits(logits: Tensor, mask: Tensor) -> Tensor:
     infty = tensor(-1e9, device=logits.device)
     masked_logits = where(mask, logits, infty)
     return masked_logits
 
 
-@th.jit.script
+# @th.jit.script
 def segmented_gather(src: Tensor, indices: Tensor, start_indices: Tensor) -> Tensor:
     real_indices = start_indices + indices.squeeze()
     return src[real_indices]
 
 
-@th.jit.script
+# @th.jit.script
 def gather(src: Tensor, indices: Tensor) -> Tensor:
     return src.gather(-1, indices).squeeze(-1)
 
 
-@th.jit.script
+# @th.jit.script
 def sample_action(p: Tensor, deterministic: bool = False) -> Tensor:
     a = multinomial(p, 1) if not deterministic else argmax(p, dim=-1).view(-1, 1)
     return a
 
 
-@th.jit.script
+# @th.jit.script
 def get_start_indices(splits: Tensor) -> Tensor:
     splits = roll(splits, 1)
     splits[0] = 0
@@ -101,7 +101,7 @@ def get_start_indices(splits: Tensor) -> Tensor:
     return start_indices
 
 
-@th.jit.script
+# @th.jit.script
 def data_splits_and_starts(n_nodes: Tensor) -> tuple[list[int], Tensor]:
     data_splits: Tensor = n_nodes  # number of nodes in each graph
     data_starts = get_start_indices(data_splits)  # start index of each graph
@@ -111,7 +111,7 @@ def data_splits_and_starts(n_nodes: Tensor) -> tuple[list[int], Tensor]:
     return split_list, data_starts
 
 
-@th.jit.script
+# @th.jit.script
 def segmented_softmax(logits: Tensor, batch_ind: Tensor, n_graphs: int) -> Tensor:
     probs = segment_softmax(logits, batch_ind, n_graphs)
     assert not (probs.isnan()).any()
@@ -119,12 +119,12 @@ def segmented_softmax(logits: Tensor, batch_ind: Tensor, n_graphs: int) -> Tenso
     return probs
 
 
-@th.jit.script
+# @th.jit.script
 def node_probs(x: Tensor, batch: Tensor, n_graphs: int) -> Tensor:
     return segmented_softmax(x, batch, n_graphs)
 
 
-@th.jit.script
+# @th.jit.script
 def action_logits_given_node(
     node_embeds: Tensor, node: Tensor, n_nodes: Tensor
 ) -> Tensor:
@@ -132,7 +132,7 @@ def action_logits_given_node(
     return segmented_gather(node_embeds, node.squeeze(), data_starts)
 
 
-@th.jit.script
+# @th.jit.script
 def node_logits_given_action(
     node_embeds: Tensor,
     action: Tensor,  # type: ignore
@@ -144,7 +144,7 @@ def node_logits_given_action(
     return node_embeds.gather(-1, a_expanded).squeeze(-1)
 
 
-@th.jit.script
+# @th.jit.script
 def segmented_sample(probs: Tensor, splits: list[int]) -> Tensor:
     probs_split = split(probs, splits)
     samples = [
@@ -157,7 +157,7 @@ def segmented_sample(probs: Tensor, splits: list[int]) -> Tensor:
     return stack(samples)
 
 
-@th.jit.script
+# @th.jit.script
 def segmented_argmax(probs: Tensor, splits: list[int]) -> Tensor:
     probs_split = split(probs, splits)
     samples = [argmax(x.squeeze(-1), dim=-1).reshape(1) for x in probs_split]
@@ -165,7 +165,7 @@ def segmented_argmax(probs: Tensor, splits: list[int]) -> Tensor:
     return stack(samples)
 
 
-@th.jit.script
+# @th.jit.script
 def segmented_scatter_(
     dest: Tensor, indices: Tensor, start_indices: Tensor, values: Tensor
 ) -> Tensor:
@@ -174,21 +174,21 @@ def segmented_scatter_(
     return dest
 
 
-@th.jit.script
+# @th.jit.script
 def entropy(p: Tensor, batch_size: int) -> Tensor:
     log_probs = log(p + 1e-9)  # to avoid log(0)
     entropy = (-p * log_probs).sum() / batch_size
     return entropy
 
 
-@th.jit.script
+# @th.jit.script
 def masked_entropy(p: Tensor, mask: Tensor, batch_size: int) -> Tensor:
     """Zero probability elements are masked out"""
     unmasked_probs = where(mask, p, ones_like(p))
     return entropy(unmasked_probs, batch_size)
 
 
-@th.jit.script
+# @th.jit.script
 def sample_node(
     p: Tensor, n_nodes: Tensor, deterministic: bool = False
 ) -> tuple[Tensor, Tensor]:
@@ -202,7 +202,7 @@ def sample_node(
     return a, data_starts
 
 
-@th.jit.script
+# @th.jit.script
 def concat_actions(predicate_action: Tensor, object_action: Tensor) -> Tensor:
     "Action is formatted as P(x)"
     if predicate_action.dim() == 1:
@@ -212,7 +212,7 @@ def concat_actions(predicate_action: Tensor, object_action: Tensor) -> Tensor:
     return cat((predicate_action, object_action), dim=-1)
 
 
-@th.jit.script
+# @th.jit.script
 def sample_action_and_node(
     graph_embeds: Tensor,
     node_logits: Tensor,
@@ -260,7 +260,7 @@ def sample_action_and_node(
     )
 
 
-@th.jit.script
+# @th.jit.script
 def sample_action_then_node(
     node_logits: Tensor,
     action_given_node_logits: Tensor,
@@ -328,7 +328,7 @@ def sample_action_then_node(
     )
 
 
-@th.jit.script
+# @th.jit.script
 def sample_node_then_action(
     node_predicate_embeds: Tensor,
     node_logits: Tensor,
@@ -385,14 +385,14 @@ def sample_node_then_action(
     return (a, tot_log_prob, tot_entropy, p_actions, p_nodes)
 
 
-@th.jit.script
+# @th.jit.script
 def segmented_nonzero(tnsr: Tensor, splits: list[int]):
     x_split = split(tnsr, splits)
     x_nonzero = [nonzero(x).flatten().cpu() for x in x_split]
     return x_nonzero
 
 
-@th.jit.script
+# @th.jit.script
 def segmented_prod(tnsr: Tensor, splits: list[int]):
     x_split = split(tnsr, splits)
     x_prods = [prod(x) for x in x_split]
@@ -401,7 +401,7 @@ def segmented_prod(tnsr: Tensor, splits: list[int]):
     return x_mul
 
 
-@th.jit.script
+# @th.jit.script
 def sample_node_set(
     logits: Tensor, mask: Tensor, n_nodes: Tensor
 ) -> tuple[list[Tensor], Tensor]:
@@ -445,7 +445,7 @@ def _propagate_choice(
     return batch
 
 
-@th.jit.script
+# @th.jit.script
 def eval_action_and_node(
     eval_action: Tensor,
     graph_embeds: Tensor,
@@ -483,7 +483,7 @@ def eval_action_and_node(
     )
 
 
-@th.jit.script
+# @th.jit.script
 def eval_node_then_action(
     eval_action: Tensor,
     node_predicate_embeds: Tensor,
@@ -538,7 +538,7 @@ def eval_node_then_action(
     return (tot_log_prob, tot_entropy, p_actions, p_nodes)
 
 
-@th.jit.script
+# @th.jit.script
 def eval_action_then_node(
     eval_action: Tensor,
     node_logits: Tensor,
