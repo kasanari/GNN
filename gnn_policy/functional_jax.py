@@ -21,6 +21,7 @@ from jax.numpy import (
     arange,
     asarray,
     exp,
+    expand_dims,
 )
 from jax.lax import split
 from jax.random import gumbel, categorical
@@ -137,13 +138,63 @@ def segment_softmax(
     return softmax
 
 
-def masked_softmax(x: Array, mask: Array) -> Array:
-    infty = jnp.asarray(-1e9, device=x.device)
-    masked_x = where(mask, x, infty)
-    probs = nn.softmax(masked_x, -1)
-    # assert not (probs.isnan()).any()
-    # assert not (probs.isinf()).any()
-    return probs
+@partial(jit, static_argnums=(3,))
+def marginalize(
+    ln_p_x: Array,
+    ln_p_y__x: Array,
+    batch_idx: Array,
+    num_segments: int,
+) -> Array:
+    # derive p(y) from (sparse) p(x) and (sparse) p(y|x)
+    # apply chain rule: p(x, y) = p(y|x) * p(x)
+    # then marginalize p(x, y) over x to get p(y)
+    x = segment_softmax(ln_p_x, batch_idx, num_segments)  # p(n)
+    x = expand_dims(x, 1) * softmax(ln_p_y__x)  # p(a|n) * p(n) = p(a, n), A X N
+    x = segment_sum(x, batch_idx, num_segments)  # sum over nodes to get p(a)
+    return x
+
+
+@partial(jit, static_argnums=(2,))
+def logsumexp(
+    a: Array,
+    segment_ids: Array,
+    num_segments: int,
+) -> Array:
+    # take the max along the axis
+    amax = segment_max(a, segment_ids, num_segments)
+
+    # replace infs with zeros
+    amax = lax.stop_gradient(
+        lax.select(jnp.isfinite(amax), amax, lax.full_like(amax, 0))
+    )
+    expanded_amax = amax[segment_ids]
+
+    # subtract the max to avoid overflow
+    exp_a = lax.exp(lax.sub(a, expanded_amax))
+
+    # sum over the axis
+    sumexp = segment_sum(exp_a, segment_ids, num_segments)
+
+    # add the max back
+    out = lax.add(lax.log(sumexp), amax)
+
+    return out
+
+
+@partial(jit, static_argnums=(3,))
+def marginalize_logits(
+    ln_p_x: Array,  # 1 x N
+    ln_p_y__x: Array,  # N x A
+    batch_idx: Array,
+    num_segments: int,
+) -> Array:  # 1 x A
+    # use logsumexp trick to marginalize over x
+    return logsumexp(expand_dims(ln_p_x, 1) + ln_p_y__x, batch_idx, num_segments)
+
+
+def segmented_gather(src: Array, indices: Array, start_indices: Array) -> Array:
+    real_indices = start_indices + indices.squeeze()
+    return src[real_indices]
 
 
 gather: Callable[[Array, Array], Array] = vmap(lambda x, y: x[y], in_axes=(0, 0))
@@ -169,6 +220,7 @@ def data_starts(n_nodes: Array) -> Array:
     return get_start_indices(n_nodes)
 
 
+@jit
 def mask_logits(mask: Mask, x: Array) -> Array:
     return where(mask, x, -1e9)
 
@@ -189,16 +241,8 @@ def node_probs(batch: Array, logits: Array, n_graphs: int) -> Array:
     return p
 
 
-@jit
-def action_given_node_probs(
-    node_embeds: Array, node: Array, mask: Array, n_nodes: Array
-) -> tuple[Array, Array]:
-    # _data_starts = data_starts(n_nodes)
-    # logits = segmented_gather(node_embeds, node, _data_starts)
-    logits = node_embeds[node]
-    masked_logits = where(mask, logits, -1e9)
-    p = nn.softmax(masked_logits, -1)  # masked_softmax(masked_logits, mask)
-    return p, masked_logits
+def action_logits_given_node(node_embeds: Array, node: Array, ds: Array) -> Array:
+    return segmented_gather(node_embeds, node.squeeze(), ds)
 
 
 @jit
@@ -258,12 +302,14 @@ def segmented_scatter_(
     return dest
 
 
+@partial(jit, static_argnums=(1,))
 def entropy(p: Array, batch_size: int) -> Array:
     log_probs = log(p + 1e-9)  # to avoid log(0)
     entropy = sum(-p * log_probs) / batch_size
     return entropy
 
 
+@partial(jit, static_argnums=(2,))
 def masked_entropy(p: Array, mask: Array, batch_size: int) -> Array:
     """Zero probability elements are masked out"""
     unmasked_probs = where(mask, p, 1.0)
@@ -304,6 +350,7 @@ def sample_action_and_node(
     predicate_mask: Array,
     node_mask: Array,
     batch: Array,
+    n_nodes: Array,
     deterministic: bool = False,
 ) -> tuple[Array, Array, Array, Array, Array]:
     assert predicate_mask.ndim == 2, "action mask must be 2D"
@@ -311,22 +358,24 @@ def sample_action_and_node(
     assert node_logits.ndim == 1, "node embeddings must be 2D"
     assert graph_embeds.ndim == 2, "graph embeddings must be 2D"
 
-    num_graphs = predicate_mask.shape[0]
+    num_graphs = n_nodes.shape[0]
 
-    pa1, masked_action_logits = action_probs(graph_embeds, predicate_mask)
-    entropy1 = masked_entropy(pa1, predicate_mask, num_graphs)
-    predicate_action, key = sample_action(key, masked_action_logits, deterministic)
-    a1_p = gather(pa1, predicate_action)
+    masked_action_logits = mask_logits(graph_embeds, predicate_mask)
+    p_actions = softmax(masked_action_logits)
+    a_action = sample_action(key, p_actions, deterministic)
+    p_action = gather(p_actions, a_action)
 
-    pa2, masked_node_logits = node_probs(node_logits, node_mask, batch)
-    entropy2 = masked_entropy(pa2, node_mask, num_graphs)
-    a2, data_starts, key = sample_node(key, masked_node_logits, batch, deterministic)
-    a2_p = pa2[a2]  # segmented_gather(pa2, a2, data_starts)
+    masked_node_logits = mask_logits(node_logits, node_mask)
+    p_nodes = node_probs(batch, masked_node_logits, num_graphs)
+    a_node, data_starts = sample_node(p_nodes, n_nodes, deterministic)
+    p_node = segmented_gather(p_nodes, a_node, data_starts)
 
-    tot_log_prob = log(a1_p * a2_p + 1e-9)
-    tot_entropy = entropy1 + entropy2  # H(X, Y) = H(X) + H(Y|X)
+    tot_log_prob = log(p_action * p_node + 1e-9)
+    tot_entropy = masked_entropy(
+        p_actions, predicate_mask, num_graphs
+    ) + masked_entropy(p_nodes, node_mask, num_graphs)  # H(X, Y) = H(X) + H(Y|X)
 
-    a = concat_actions(predicate_action=predicate_action, object_action=a2)
+    a = concat_actions(predicate_action=a_action, object_action=a_node)
 
     assert tot_log_prob.shape[0] == predicate_mask.shape[0]
     assert tot_entropy.ndim == 0, "entropy must be a scalar"
@@ -337,144 +386,151 @@ def sample_action_and_node(
         a,
         tot_log_prob,
         tot_entropy,
-        pa1,
-        pa2,
+        p_actions,
+        p_nodes,
     )
 
 
-@partial(jit, static_argnames=("n_graphs",))
 def eval_action_then_node(
     eval_action: Array,
-    graph_embeds: Array,
-    node_predicate_embeds: Array,
+    node_logits: Array,
+    action_given_node_logits: Array,
+    node_given_action_logits: Array,
     predicate_mask: Array,
     node_mask: Array,
     batch: Array,
     n_nodes: Array,
-    n_graphs: int,
-) -> tuple[Array, Array]:
+) -> tuple[Array, Array, Array, Array]:
     predicate_action = eval_action[:, 0]  # .long().view(-1, 1)
     # The node actions are locally indexed, so we need to convert them to global indices
     ds = data_starts(n_nodes)
     node_action = ds + eval_action[:, 1]  # .long().view(-1, 1)
     assert predicate_mask.ndim == 2, "action mask must be 2D"
     assert node_mask.ndim == 1, "node mask must be 1D"
-    assert node_predicate_embeds.ndim == 2, "node embeddings must be 2D"
-    assert graph_embeds.ndim == 2, "graph embeddings must be 2D"
+    assert node_given_action_logits.ndim == 2, "action|node embeddings must be 2D"
+    assert node_given_action_logits.ndim == 2, "node|action embeddings must be 2D"
     assert node_action.ndim == 1
-    assert node_action.ndim == 1
+
     assert predicate_action.ndim == 1
     assert predicate_action.ndim == 1
 
-    # num_graphs = predicate_mask.shape[0]
-    masked_action_logits = mask_logits(predicate_mask, graph_embeds)
-    pa1 = softmax(masked_action_logits)
-    a1_p = gather(pa1, predicate_action)
-    entropy1 = masked_entropy(pa1, predicate_mask, n_graphs)
+    num_graphs = n_nodes.shape[0]
 
-    node_logits = node_logits_given_action(
-        node_predicate_embeds, predicate_action, batch
+    p_actions = marginalize(
+        mask_logits(node_mask, node_logits),
+        action_given_node_logits,  # TODO mask
+        batch,
+        num_graphs,
     )
-    masked_node_logits = mask_logits(node_mask, node_logits)
-    pa2 = node_probs(batch, masked_node_logits, n_graphs)
 
-    entropy2 = masked_entropy(pa2, node_mask, n_graphs)
+    p_nodes = node_probs(
+        batch,
+        mask_logits(
+            node_mask,
+            node_logits_given_action(node_given_action_logits, predicate_action, batch),
+        ),
+        num_graphs,
+    )
 
-    a2_p = pa2[node_action]
-    a2_p = where(
-        predicate_action.squeeze() == 0, ones_like(a2_p), a2_p
-    )  # Assume 0 means no action, therefore parameter prob is 1
+    p_action = gather(p_actions, predicate_action)
+    p_node = p_nodes[node_action]
 
-    # assert not any(a2_p == 0), "node probabilities must be non-zero"
-    tot_log_prob = log(a1_p * a2_p + 1e-9)
-    tot_entropy = entropy1 + entropy2  # H(X, Y) = H(X) + H(Y|X)
+    p_node = where(predicate_action.squeeze() == 0, ones_like(p_node), p_node)
 
-    assert tot_log_prob.shape[0] == predicate_mask.shape[0]
+    tot_log_prob = log(p_action * p_node + 1e-9)
+    tot_entropy = masked_entropy(
+        p_actions, predicate_mask, num_graphs
+    ) + masked_entropy(p_nodes, node_mask, num_graphs)  # H(X, Y) = H(X) + H(Y|X)
+
+    # assert not (a2_p == 0).any(), "node probabilities must be non-zero"
+    assert tot_log_prob.shape[0] == num_graphs
     assert tot_entropy.ndim == 0, "entropy must be a scalar"
 
     return (
         tot_log_prob,
         tot_entropy,
+        p_actions,
+        p_nodes,
     )
 
 
-@partial(
-    jit,
-    static_argnames=(
-        "n_graphs",
-        "deterministic",
-    ),
-)
 def sample_action_then_node(
     key: Array,
-    action_logits: Array,
-    node_predicate_logits: Array,
+    node_logits: Array,
+    action_given_node_logits: Array,
+    node_given_action_logits: Array,
     predicate_mask: Array,
     node_mask: Array,
     batch: Array,
     n_nodes: Array,
-    n_graphs: int,
     deterministic: bool,
 ) -> tuple[Array, Array, Array, Array, Array]:
     assert predicate_mask.ndim == 2, "action mask must be 2D"
     assert node_mask.ndim == 1, "node mask must be 1D"
-    assert node_predicate_logits.ndim == 2, "node embeddings must be 2D"
-    assert action_logits.ndim == 2, "graph embeddings must be 2D"
-    assert action_logits.shape[1] == predicate_mask.shape[1]
-    num_graphs = predicate_mask.shape[0]
-    ds = data_starts(n_nodes)
-    masked_action_logits = mask_logits(predicate_mask, action_logits)
-    pa1 = softmax(masked_action_logits)
-    entropy1 = masked_entropy(pa1, predicate_mask, num_graphs)
+    assert node_given_action_logits.ndim == 2, "node embeddings must be 2D"
+    assert node_logits.ndim == 1, "graph embeddings must be 2D"
 
-    key, *subkeys = random.split(key, n_graphs + 1)
+    num_graphs = n_nodes.shape[0]
+    ds = data_starts(n_nodes)
+    action_logits = marginalize_logits(
+        node_logits, action_given_node_logits, batch, num_graphs
+    )
+    masked_action_logits = mask_logits(predicate_mask, action_logits)
+
+    masked_node_logits = mask_logits(node_mask, node_logits)
+
+    p_actions = marginalize(
+        masked_node_logits,
+        action_given_node_logits,  # TODO mask
+        batch,
+        num_graphs,
+    )
+
+    key, *subkeys = random.split(key, num_graphs + 1)
     predicate_action = sample_action(
         asarray(subkeys), masked_action_logits, deterministic
     )
 
-    node_logits = node_logits_given_action(
-        node_predicate_logits, predicate_action, batch
+    node_given_action_logits = node_logits_given_action(
+        node_given_action_logits, predicate_action, batch
     )
-    masked_node_logits = mask_logits(node_mask, node_logits)
-    pa2 = node_probs(batch, masked_node_logits, n_graphs)
+    masked_node_given_action_logits = mask_logits(node_mask, node_given_action_logits)
+    p_nodes = node_probs(batch, masked_node_given_action_logits, num_graphs)
 
-    entropy2 = masked_entropy(pa2, node_mask, num_graphs)
-    key, subkeys = random.split(key)
     node_action = sample_node(
-        subkeys,
-        masked_node_logits,
+        key,
+        masked_node_given_action_logits,
         batch,
-        n_graphs,
+        num_graphs,
         deterministic=deterministic,
     )
 
-    a1_p = gather(pa1, predicate_action)
-    a2_p = pa2[node_action]
-    assert a2_p.shape == node_action.shape
-    a2_p = where(predicate_action.squeeze() == 0, ones_like(a2_p), a2_p)  # Assume a
-    assert a2_p.shape == node_action.shape
+    p_action = gather(p_actions, predicate_action)
+    p_node = p_nodes[node_action]
 
-    # assert not any(a2_p == 0), "node probabilities must be non-zero"
+    p_node = where(predicate_action.squeeze() == 0, ones_like(p_node), p_node)
+    assert not (p_node == 0).any(), "node probabilities must be non-zero"
 
-    tot_log_prob = log(a1_p * a2_p + 1e-9)
-    tot_entropy = entropy1 + entropy2  # H(X, Y) = H(X) + H(Y|X)
+    tot_log_prob = log(p_action * p_node + 1e-9)
+    tot_entropy = masked_entropy(
+        p_actions, predicate_mask, num_graphs
+    ) + masked_entropy(p_nodes, node_mask, num_graphs)  # H(X, Y) = H(X) + H(Y|X)
 
     real_nodes = node_action - ds  # unbatched nodes indices for each graph
 
     a = concat_actions(predicate_action=predicate_action, object_action=real_nodes)
 
-    assert tot_log_prob.shape[0] == predicate_mask.shape[0]
-    assert tot_entropy.ndim == 0, "entropy must be a scalar"
-    assert a.shape[0] == predicate_mask.shape[0]
+    assert tot_log_prob.shape[0] == num_graphs
+    # assert tot_entropy.ndim == 0, "entropy must be a scalar"
+    assert a.shape[0] == num_graphs
     assert a.shape[1] == 2, "action must have two components, was {}".format(a.shape)
 
     return (
         a,
         tot_log_prob,
         tot_entropy,
-        key,
-        pa1,
-        pa2,
+        p_actions,
+        p_nodes,
     )
 
 
@@ -486,52 +542,55 @@ def sample_node_then_action(
     node_mask: Array,
     batch: Array,
     n_nodes: Array,
-    n_graphs: int,
     deterministic: bool = False,
-) -> tuple[Array, Array, Array, Array, Array, Array]:
+) -> tuple[Array, Array, Array, Array, Array]:
     assert node_mask.ndim == 1, "node mask must be 1D"
-    assert node_logits.ndim == 1, "node logits must be 1D"
-    assert predicate_mask.ndim == 2, "action mask must be 2D"
+    assert node_logits.ndim == 1, "node logits must be 1D, was {}".format(
+        node_logits.shape
+    )
+    assert predicate_mask.ndim == 2, "action mask must be 2D, was {}".format(
+        predicate_mask.shape
+    )
     assert node_predicate_embeds.ndim == 2, "node action embeddings must be 2D"
     num_graphs = predicate_mask.shape[0]
+    masked_node_logits = mask_logits(node_mask, node_logits)
+    p_nodes = node_probs(batch, masked_node_logits, num_graphs)
+    key, subkey = random.split(key)
+    a_node = sample_node(subkey, masked_node_logits, batch, num_graphs, deterministic)
 
-    pa1, masked_node_logits = node_probs(node_logits, node_mask, batch)
-    entropy1 = masked_entropy(pa1, node_mask, num_graphs)
-    node_action, data_starts, key = sample_node(
-        key, masked_node_logits, batch, deterministic
+    p_node = p_nodes[a_node]
+
+    assert not (p_node == 0).any(), "node probabilities must be non-zero"
+    ds = data_starts(n_nodes)
+    masked_action_logits = mask_logits(
+        predicate_mask,
+        action_logits_given_node(node_predicate_embeds, a_node, ds),
     )
+    p_actions = softmax(masked_action_logits)
 
-    a1_p = pa1[node_action]
-    # segmented_gather(
-    #    pa1, node_action, data_starts
-    # )  # probabilities of the selected nodes
+    _, *subkeys = random.split(key, num_graphs + 1)
+    a_action = sample_action(asarray(subkeys), masked_action_logits, deterministic)
+    p_action = gather(p_actions, a_action)
 
-    assert not any(a1_p == 0), "node probabilities must be non-zero."
+    # p_node = where(a_action.squeeze() == 0, ones_like(p_node), p_node)
 
-    pa2, action_logits = action_given_node_probs(
-        node_predicate_embeds, node_action, predicate_mask, n_nodes
-    )
+    tot_log_prob = log(p_node * p_action + 1e-9)
+    tot_entropy = masked_entropy(p_nodes, node_mask, num_graphs) + masked_entropy(
+        p_actions, predicate_mask, num_graphs
+    )  # H(X, Y) = H(X) + H(Y|X)
 
-    masked_action_logits = where(predicate_mask, action_logits, -1e9)
+    real_nodes = a_node - ds  # unbatched nodes indices for each graph
 
-    entropy2 = masked_entropy(pa2, predicate_mask, num_graphs)
-    predicate_action, key = sample_action(key, masked_action_logits, deterministic)
+    a = concat_actions(predicate_action=a_action, object_action=real_nodes)
 
-    a2_p = gather(pa2, predicate_action)
-
-    tot_log_prob = log(a1_p * a2_p + 1e-9)
-    tot_entropy = entropy1 + entropy2  # H(X, Y) = H(X) + H(Y|X)
-
-    a = concat_actions(predicate_action=predicate_action, object_action=node_action)
-
-    assert tot_log_prob.shape[0] == predicate_mask.shape[0]
+    assert tot_log_prob.shape[0] == num_graphs
     assert tot_entropy.ndim == 0, "entropy must be a scalar"
-    assert a.shape[0] == predicate_mask.shape[0]
+    assert a.shape[0] == num_graphs
     assert a.shape[1] == 2, f"action must have two components, was {a.shape}"
 
     assert not isinf(tot_log_prob).any()
 
-    return (a, tot_log_prob, tot_entropy, pa2, pa1, key)
+    return (a, tot_log_prob, tot_entropy, p_actions, p_nodes)
 
 
 def eval_action_and_node(
@@ -541,25 +600,26 @@ def eval_action_and_node(
     predicate_mask: Array,
     node_mask: Array,
     batch: Array,
+    n_nodes: Array,
 ) -> tuple[Array, Array]:
     assert predicate_mask.ndim == 2, "action mask must be 2D"
     assert node_mask.ndim == 1, "node mask must be 2D"
     assert node_logits.ndim == 1, "node embeddings must be 2D"
     assert graph_embeds.ndim == 2, "graph embeddings must be 2D"
 
-    num_graphs = predicate_mask.shape[0]
+    num_graphs = n_nodes.shape[0]
     predicate_action = eval_action[:, 0]
     a2 = eval_action[:, 1]
 
-    pa1, _ = action_probs(graph_embeds, predicate_mask)
-    entropy1 = masked_entropy(pa1, predicate_mask, num_graphs)
-    a1_p = gather(pa1, predicate_action)
-    pa2, _ = node_probs(node_logits, node_mask, batch)
-    entropy2 = masked_entropy(pa2, node_mask, num_graphs)
-    _, ds = data_starts(batch)
-    a2_p = pa2[a2]  # segmented_gather(pa2, a2, ds)
-    tot_log_prob = log(a1_p * a2_p + 1e-9)
-    tot_entropy = entropy1 + entropy2  # H(X, Y) = H(X) + H(Y|X)
+    p_actions = softmax(mask_logits(graph_embeds, predicate_mask))
+    p_action = gather(p_actions, predicate_action)
+    p_nodes = node_probs(mask_logits(node_logits, node_mask), batch, num_graphs)
+    _, data_starts = data_splits_and_starts(n_nodes)
+    p_node = segmented_gather(p_nodes, a2, data_starts)
+    tot_log_prob = log(p_action * p_node + 1e-9)
+    tot_entropy = masked_entropy(
+        p_actions, predicate_mask, num_graphs
+    ) + masked_entropy(p_nodes, node_mask, num_graphs)  # H(X, Y) = H(X) + H(Y|X)
 
     assert tot_log_prob.shape[0] == predicate_mask.shape[0]
     assert tot_entropy.ndim == 0, "entropy must be a scalar"
@@ -574,12 +634,15 @@ def eval_node_then_action(
     eval_action: Array,
     node_predicate_embeds: Array,
     node_logits: Array,
-    predicate_mask: Mask,
-    node_mask: Mask,
-    batch: BatchIdx,
-) -> tuple[Array, Array]:
-    node_action = eval_action[:, 1]  # .reshape(-1, 1)
-    predicate_action = eval_action[:, 0]  # .reshape(-1, 1)
+    predicate_mask: Array,
+    node_mask: Array,
+    batch: Array,
+    n_nodes: Array,
+) -> tuple[Array, Array, Array, Array]:
+    ds = data_starts(n_nodes)
+    node_action = eval_action[:, 1]
+    node_action = ds + node_action
+    predicate_action = eval_action[:, 0]
 
     assert node_mask.ndim == 1, "node mask must be 1D"
     assert node_logits.ndim == 1, "node logits must be 1D"
@@ -587,31 +650,31 @@ def eval_node_then_action(
     assert node_predicate_embeds.ndim == 2, "node action embeddings must be 2D"
     assert node_action.ndim == 1
     assert predicate_action.ndim == 1
-    # assert predicate_action.shape[-1] == 1
 
-    num_graphs = predicate_mask.shape[0]
-    p_node, _ = node_probs(node_logits, node_mask, batch)
-    entropy1 = masked_entropy(p_node, node_mask, num_graphs)
+    num_graphs = n_nodes.shape[0]
+    masked_node_logits = mask_logits(node_mask, node_logits)
+    p_nodes = node_probs(batch, masked_node_logits, num_graphs)
+    p_node = p_nodes[node_action]
 
-    ds = data_starts(batch)
-    a1_p = p_node[node_action]
-    # segmented_gather(
-    #    p_node, node_action, ds
-    # )  # probabilities of the selected nodes
-
-    pa2, _ = action_given_node_probs(
-        node_predicate_embeds, node_action, predicate_mask, n_nodes
+    p_actions = softmax(
+        mask_logits(
+            predicate_mask,
+            action_logits_given_node(node_predicate_embeds, node_action, ds),
+        )
     )
-    entropy2 = masked_entropy(pa2, predicate_mask, num_graphs)
 
-    a2_p = gather(pa2, predicate_action)
+    p_action = gather(p_actions, predicate_action)
 
-    tot_log_prob = log(a1_p * a2_p + 1e-9)
-    tot_entropy = entropy1 + entropy2  # H(X, Y) = H(X) + H(Y|X)
+    # p_node = where(predicate_action.squeeze() == 0, ones_like(p_node), p_node)
 
-    assert not (a1_p == 0).any(), "node probabilities must be non-zero"
+    tot_log_prob = log(p_node * p_action + 1e-9)
+    tot_entropy = masked_entropy(p_nodes, node_mask, num_graphs) + masked_entropy(
+        p_actions, predicate_mask, num_graphs
+    )  # H(X, Y) = H(X) + H(Y|X)
+
+    assert not (p_node == 0).any(), "node probabilities must be non-zero"
     assert tot_log_prob.shape[0] == predicate_mask.shape[0]
     assert tot_entropy.ndim == 0, "entropy must be a scalar"
     assert not isinf(tot_log_prob).any()
 
-    return (tot_log_prob, tot_entropy)
+    return (tot_log_prob, tot_entropy, p_actions, p_nodes)

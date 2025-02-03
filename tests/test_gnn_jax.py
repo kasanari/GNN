@@ -2,15 +2,17 @@ from jax.numpy import array, log, where, isclose, asarray, all
 from jax import random
 import gnn_policy.functional_jax as F
 import pytest
+from jax.numpy import float32
 
 
 def data_splits_and_starts():
     batch_idx = array([0, 0, 0, 1, 1, 1])
-    splits, starts = F.data_splits_and_starts(batch_idx)
-    assert splits == [3, 3]
+    n_graphs = array([3, 3])
+    starts = F.data_starts(n_graphs)
+
     assert (starts == array([0, 3])).all()
-    assert len(splits) == len(starts)
-    assert len(splits) == 2
+    assert len(n_graphs) == len(starts)
+    assert len(n_graphs) == 2
 
 
 def test_masked_segmented_softmax():
@@ -21,20 +23,6 @@ def test_masked_segmented_softmax():
     n_segments = 2
     probs = F.segmented_softmax(masked_logits, batch_ind, n_segments)
     assert all(isclose(probs, array([0.5, 0.5, 0.5, 0.0, 0.5])))
-
-
-def test_masked_softmax():
-    x = array([50, 0, 50])
-    mask = array([True, False, True])
-    probs = F.masked_softmax(x, mask)
-    assert (probs == array([0.5, 0.0, 0.5])).all()
-
-    x = array([[50, 0, 50], [0, 50, 0], [20, 20, 20]])
-    mask = array([[True, False, True], [False, True, False], [True, True, True]])
-    probs = F.masked_softmax(x, mask)
-    assert (
-        probs == array([[0.5, 0.0, 0.5], [0.0, 1.0, 0.0], [1 / 3, 1 / 3, 1 / 3]])
-    ).all()
 
 
 def test_segmented_argmax():
@@ -136,19 +124,21 @@ def test_sample_action_given_node():
     n_nodes = array([3])
     key = random.key(42)
     n_graphs = 1
-    _, masked_logits = F.action_given_node_probs(x, node, action_mask, n_nodes)
+    action_logits = F.action_logits_given_node(x, node, n_nodes)
+    masked_action_logits = F.mask_logits(action_mask, action_logits)
     key, *keys = random.split(key, n_graphs + 1)
-    a = F.sample_action(asarray(keys), masked_logits, False)
+    a = F.sample_action(asarray(keys), masked_action_logits, False)
     assert all(a == array([1]))
 
-    x = array([[10, 0], [0, 10], [10, 1]], dtype="float32")
+    x = array([[10, 0], [0, 10], [100, 10]], dtype="float32")
     action_mask = array([[True, True], [False, True]])
     node = array([1, 0])
     n_nodes = array([2, 1])
     n_graphs = 2
-    _, masked_logits = F.action_given_node_probs(x, node, action_mask, n_nodes)
+    action_logits = F.action_logits_given_node(x, node, n_nodes)
+    masked_action_logits = F.mask_logits(action_mask, action_logits)
     _, *keys = random.split(key, n_graphs + 1)
-    a = F.sample_action(asarray(keys), masked_logits, False)
+    a = F.sample_action(asarray(keys), masked_action_logits, False)
     assert all(a == array([1, 1]))
 
 
@@ -159,7 +149,8 @@ def test_sample_node_given_action():
     batch = array([0, 0, 0])
     n_graphs = 1
     key = random.key(42)
-    _, masked_logits = F.node_logits_given_action(x, action, batch, node_mask, n_graphs)
+    node_logits = F.node_logits_given_action(x, action, batch)
+    masked_logits = F.mask_logits(node_mask, node_logits)
 
     a = F.sample_node(
         key,
@@ -177,7 +168,8 @@ def test_sample_node_given_action():
     ds = F.data_starts(array([2, 3]))
     n_graphs = 2
 
-    _, masked_logits = F.node_logits_given_action(x, action, batch, node_mask, n_graphs)
+    node_logits = F.node_logits_given_action(x, action, batch)
+    masked_logits = F.mask_logits(node_mask, node_logits)
     key = random.key(42)
 
     a = F.sample_node(
@@ -191,8 +183,14 @@ def test_sample_node_given_action():
 
 
 def test_sample_action_and_node():
-    x1 = array([[10, 0]])
-    x2 = array([10, 0, 0])
+    node_logits = array([100, 0, 10, 0, 100], dtype=float32)  # ln(p(n))
+
+    node_given_action_logits = array(
+        [[70, 100], [60, 0], [50, 10], [0, 500], [100, 10]], dtype=float32
+    )  # ln(p(n | a))
+    action_given_node_logits = array(
+        [[10, 100], [0, 0], [0, 0], [0, 100], [100, 0]], dtype=float32
+    )  # ln(p(a | n))
     mask1 = array([[True, True]])
     mask2 = array([True, True, False])
     batch = array([0, 0, 0])
@@ -224,10 +222,18 @@ def test_sample_action_and_node():
 
 
 def test_sample_action_then_node():
-    action_logits = array([[10, 100], [10, 100]])
-    node_action_logits = array([[10, 0], [0, 10], [100, 0], [0, 100], [100, 0]])
-    action_mask = array([[True, False], [True, True]])
-    node_mask = array([True, True, False, True, True])
+    action_logits = array([[10, 100], [100, 0]], dtype=float32)  # ln(p(a))
+    node_logits = array([100, 0, 10, 0, 100], dtype=float32)  # ln(p(n))
+
+    node_given_action_logits = array(
+        [[70, 100], [60, 0], [50, 10], [0, 500], [100, 10]], dtype=float32
+    )  # ln(p(n | a))
+    action_given_node_logits = array(
+        [[10, 100], [0, 0], [0, 0], [0, 100], [100, 0]], dtype=float32
+    )  # ln(p(a | n))
+
+    action_mask = array([[True, True], [True, True]])
+    node_mask = array([True, True, True, True, True])
     batch = array([0, 0, 0, 1, 1])
     key = random.key(42)
     n_nodes = array([3, 2])
@@ -235,29 +241,29 @@ def test_sample_action_then_node():
 
     a, logprob, h, *_ = F.sample_action_then_node(
         key,
-        action_logits,
-        node_action_logits,
+        node_logits,
+        action_given_node_logits,
+        node_given_action_logits,
         action_mask,
         node_mask,
         batch,
         n_nodes,
-        n_graphs,
         False,
     )
     assert all(
-        a == array([[0, 0], [1, 0]])
+        a == array([[1, 0], [0, 1]])
     ), "expected 0, 0 and 1, 0 but got {a}".format(a=a)
     assert logprob.shape == (n_graphs,)
 
-    eval_logprob, h = F.eval_action_then_node(
+    eval_logprob, h, *_ = F.eval_action_then_node(
         a,
-        action_logits,
-        node_action_logits,
+        node_logits,
+        action_given_node_logits,
+        node_given_action_logits,
         action_mask,
         node_mask,
         batch,
         n_nodes,
-        n_graphs,
     )
 
     assert eval_logprob.shape == (n_graphs,)
@@ -267,34 +273,46 @@ def test_sample_action_then_node():
 
 
 def test_sample_node_then_action():
+    # 10, 100, 0 | 100, 0
+
     node_logits = array([10, 100, 0, 100, 0], dtype="float32")
     action_logits = array(
         [[10, 100], [0, 100], [0, 100], [100, 10], [100, 0]], dtype="float32"
     )
-    # expect 0, 0
+    n_nodes = array([3, 2])
+    # expect nodes 0 and 0 to be sampled
+
+    # the 100 in the first graph is masked
     node_mask = array([True, False, True, True, True])
+
+    # action 1 is masked in the first graph
+    # action 0 is masked in the second graph
+
     action_mask = array([[True, False], [False, True]])
     batch = array([0, 0, 0, 1, 1])
     key = random.key(42)
 
-    a, logprob, h, *_ = F.sample_node_then_action(
+    a, logprob, h, p_a__n, p_n = F.sample_node_then_action(
         key,
         action_logits,
         node_logits,
         action_mask,
         node_mask,
         batch,
+        n_nodes,
+        False,
     )
     assert (a == array([[0, 0], [1, 0]])).all()
     assert logprob.shape == (2,)
 
-    eval_logprob, h = F.eval_node_then_action(
+    eval_logprob, h, *_ = F.eval_node_then_action(
         a,
         action_logits,
         node_logits,
         action_mask,
         node_mask,
         batch,
+        n_nodes,
     )
 
     assert (a == array([[0, 0], [1, 0]])).all()
@@ -318,20 +336,18 @@ def test_sample_node_set():
 if __name__ == "__main__":
     import jax.profiler
 
-    with jax.profiler.trace("/tmp/jax-trace", create_perfetto_link=True):
-        test_sample_action_given_node()
+    test_sample_action_given_node()
     test_sample_node()
-    test_sample_node_set()
+    # test_sample_node_set()
     test_sample_node_then_action()
     test_sample_action_then_node()
-    test_sample_action_and_node()
+    # test_sample_action_and_node()
     test_sample_node_given_action()
     test_entropy()
     test_masked_entropy()
     test_graph_action()
     test_segmented_gather()
     test_segmented_sample()
-    test_masked_softmax()
     test_masked_segmented_softmax()
     data_splits_and_starts()
     pass
