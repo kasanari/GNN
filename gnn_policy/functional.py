@@ -265,30 +265,32 @@ def sample_action_then_node(
     action_given_node_logits: Tensor,
     node_given_action_logits: Tensor,
     predicate_mask: Tensor,
-    node_mask: Tensor,
+    action_given_node_mask: Tensor,
     batch: Tensor,
     n_nodes: Tensor,
     deterministic: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
     assert predicate_mask.dim() == 2, "action mask must be 2D"
-    assert node_mask.dim() == 1, "node mask must be 1D"
+    assert action_given_node_mask.dim() == 2, "node mask must be 1D"
     assert node_given_action_logits.dim() == 2, "node embeddings must be 2D"
     assert node_logits.dim() == 1, "graph embeddings must be 2D"
     # assert node_logits.shape[1] == predicate_mask.shape[1]
     num_graphs = n_nodes.shape[0]
 
     p_actions = marginalize(
-        mask_logits(node_logits, node_mask),
-        action_given_node_logits,  # TODO mask
+        node_logits,
+        action_given_node_logits,
         batch,
         num_graphs,
     )
+    p_actions = p_actions * predicate_mask
     predicate_action = sample_action(p_actions, deterministic)
 
     p_nodes = node_probs(
-        mask_logits(
-            node_logits_given_action(node_given_action_logits, predicate_action, batch),
-            node_mask,
+        node_logits_given_action(
+            mask_logits(node_given_action_logits, action_given_node_mask),
+            predicate_action,
+            batch,
         ),
         batch,
         num_graphs,
@@ -331,8 +333,8 @@ def sample_action_then_node(
 def sample_node_then_action(
     node_predicate_embeds: Tensor,
     node_logits: Tensor,
-    predicate_mask: Tensor,
     node_mask: Tensor,
+    action_given_node_mask: Tensor,
     batch: Tensor,
     n_nodes: Tensor,
     deterministic: bool = False,
@@ -341,11 +343,11 @@ def sample_node_then_action(
     assert node_logits.dim() == 1, "node logits must be 1D, was {}".format(
         node_logits.shape
     )
-    assert predicate_mask.dim() == 2, "action mask must be 2D, was {}".format(
-        predicate_mask.shape
+    assert action_given_node_mask.dim() == 2, "action mask must be 2D, was {}".format(
+        action_given_node_mask.shape
     )
     assert node_predicate_embeds.dim() == 2, "node action embeddings must be 2D"
-    num_graphs = predicate_mask.shape[0]
+    num_graphs = n_nodes.shape[0]
     p_nodes = node_probs(mask_logits(node_logits, node_mask), batch, num_graphs)
     a_node, data_starts = sample_node(p_nodes, n_nodes, deterministic)
 
@@ -356,10 +358,11 @@ def sample_node_then_action(
     assert not (p_node == 0).any(), "node probabilities must be non-zero"
 
     p_actions = softmax(
-        mask_logits(
-            action_logits_given_node(node_predicate_embeds, a_node, n_nodes),
-            predicate_mask,
-        )
+        action_logits_given_node(
+            mask_logits(node_predicate_embeds, action_given_node_mask),
+            a_node,
+            n_nodes,
+        ),
     )
     a_action = sample_action(p_actions, deterministic)
 
@@ -487,8 +490,8 @@ def eval_node_then_action(
     eval_action: Tensor,
     node_predicate_embeds: Tensor,
     node_logits: Tensor,
-    predicate_mask: Tensor,
     node_mask: Tensor,
+    action_given_node_mask: Tensor,
     batch: Tensor,
     n_nodes: Tensor,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
@@ -497,7 +500,7 @@ def eval_node_then_action(
 
     assert node_mask.dim() == 1, "node mask must be 1D"
     assert node_logits.dim() == 1, "node logits must be 1D"
-    assert predicate_mask.dim() == 2, "action mask must be 2D"
+    assert action_given_node_mask.dim() == 2, "action mask must be 2D"
     assert node_predicate_embeds.dim() == 2, "node action embeddings must be 2D"
     assert node_action.dim() == 2
     assert node_action.shape[-1] == 1
@@ -514,15 +517,14 @@ def eval_node_then_action(
     )  # probabilities of the selected nodes
 
     p_actions = softmax(
-        mask_logits(
-            action_logits_given_node(node_predicate_embeds, node_action, n_nodes),
-            predicate_mask,
-        )
+        action_logits_given_node(
+            mask_logits(node_predicate_embeds, action_given_node_mask),
+            node_action,
+            n_nodes,
+        ),
     )
 
     p_action = gather(p_actions, predicate_action)
-
-    # p_node = where(predicate_action.squeeze() == 0, ones_like(p_node), p_node)
 
     tot_log_prob = log(p_node * p_action + 1e-9)
     h_n = segmented_entropy(p_nodes, batch, num_graphs)
@@ -530,7 +532,7 @@ def eval_node_then_action(
     tot_entropy = (h_n + h_a).mean()  # H(X, Y) = H(X) + H(Y|X)
 
     assert not (p_node == 0).any(), "node probabilities must be non-zero"
-    assert tot_log_prob.shape[0] == predicate_mask.shape[0]
+    assert tot_log_prob.shape[0] == n_nodes.shape[0]
     assert tot_entropy.dim() == 0, "entropy must be a scalar"
     assert not tot_log_prob.isinf().any()
 
@@ -544,14 +546,14 @@ def eval_action_then_node(
     action_given_node_logits: Tensor,
     node_given_action_logits: Tensor,
     predicate_mask: Tensor,
-    node_mask: Tensor,
+    node_given_action_mask: Tensor,
     batch: Tensor,
     n_nodes: Tensor,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     node_action = eval_action[:, 1].long().view(-1, 1)
     predicate_action = eval_action[:, 0].long().view(-1, 1)
     assert predicate_mask.dim() == 2, "action mask must be 2D"
-    assert node_mask.dim() == 1, "node mask must be 1D"
+    assert node_given_action_mask.dim() == 2, "node mask must be 2D"
     assert node_given_action_logits.dim() == 2, "action|node embeddings must be 2D"
     assert node_given_action_logits.dim() == 2, "node|action embeddings must be 2D"
     assert node_action.dim() == 2
@@ -562,16 +564,18 @@ def eval_action_then_node(
     num_graphs = n_nodes.shape[0]
 
     p_actions = marginalize(
-        mask_logits(node_logits, node_mask),
-        action_given_node_logits,  # TODO mask
+        node_logits,
+        action_given_node_logits,
         batch,
         num_graphs,
     )
+    p_actions = p_actions * predicate_mask
 
     p_nodes = node_probs(
-        mask_logits(
-            node_logits_given_action(node_given_action_logits, predicate_action, batch),
-            node_mask,
+        node_logits_given_action(
+            mask_logits(node_given_action_logits, node_given_action_mask),
+            predicate_action,
+            batch,
         ),
         batch,
         num_graphs,
@@ -581,8 +585,6 @@ def eval_action_then_node(
 
     p_action = gather(p_actions, predicate_action)
     p_node = segmented_gather(p_nodes, node_action, data_starts)
-
-    p_node = where(predicate_action.squeeze() == 0, ones_like(p_node), p_node)
 
     tot_log_prob = log(p_action * p_node + 1e-9)
     h_p = entropy(p_actions)
