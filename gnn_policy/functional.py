@@ -151,6 +151,8 @@ def segmented_sample(probs: Tensor, splits: list[int]) -> Tensor:
         # randint(high=len(x.squeeze(-1)), size=(1,))
         # if x.squeeze(-1).sum() == 0 or x.squeeze(-1).sum().isnan()
         multinomial(x.squeeze(-1), 1)
+        if x.shape[0] > 1
+        else th.zeros(1, device=x.device, dtype=th.long)
         for x in probs_split
     ]
 
