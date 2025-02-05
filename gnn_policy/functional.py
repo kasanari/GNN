@@ -305,7 +305,10 @@ def sample_action_then_node(
     p_node = segmented_gather(p_nodes, node_action, data_starts)
 
     assert not (p_node == 0).any(), "node probabilities must be non-zero"
-    p_node = where(predicate_action.squeeze() == 0, ones_like(p_node), p_node)
+
+    nullary_actions = arities == 0
+    is_nullary = th.atleast_1d(nullary_actions[predicate_action.squeeze()])
+    p_node = where(is_nullary, ones_like(p_node), p_node)
 
     tot_log_prob = log(p_action * p_node + 1e-9)
     tot_entropy = masked_entropy(
