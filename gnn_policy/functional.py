@@ -175,17 +175,16 @@ def segmented_scatter_(
 
 
 # @th.jit.script
-def entropy(p: Tensor, batch_size: int) -> Tensor:
+def entropy(p: Tensor) -> Tensor:
     log_probs = log(p + 1e-9)  # to avoid log(0)
-    entropy = (-p * log_probs).sum() / batch_size
-    return entropy
+    entropy = -p * log_probs
+    return entropy.mean(-1)
 
 
-# @th.jit.script
-def masked_entropy(p: Tensor, mask: Tensor, batch_size: int) -> Tensor:
-    """Zero probability elements are masked out"""
-    unmasked_probs = where(mask, p, ones_like(p))
-    return entropy(unmasked_probs, batch_size)
+def segmented_entropy(p: Tensor, indices: Tensor, n_graphs: int) -> Tensor:
+    log_probs = log(p + 1e-9)  # to avoid log(0)
+    entropy = -p * log_probs
+    return scatter(entropy, indices, dim=0, dim_size=n_graphs, reduce="mean")
 
 
 # @th.jit.script
@@ -306,14 +305,11 @@ def sample_action_then_node(
 
     assert not (p_node == 0).any(), "node probabilities must be non-zero"
 
-    nullary_actions = arities == 0
-    is_nullary = th.atleast_1d(nullary_actions[predicate_action.squeeze()])
-    p_node = where(is_nullary, ones_like(p_node), p_node)
+    h_p = entropy(p_actions)
+    h_n = segmented_entropy(p_nodes, batch, num_graphs)
 
     tot_log_prob = log(p_action * p_node + 1e-9)
-    tot_entropy = masked_entropy(
-        p_actions, predicate_mask, num_graphs
-    ) + masked_entropy(p_nodes, node_mask, num_graphs)  # H(X, Y) = H(X) + H(Y|X)
+    tot_entropy = (h_p + h_n).mean()  # H(X, Y) = H(X) + H(Y|X)
 
     a = concat_actions(predicate_action=predicate_action, object_action=node_action)
 
@@ -372,9 +368,9 @@ def sample_node_then_action(
     # p_node = where(a_action.squeeze() == 0, ones_like(p_node), p_node)
 
     tot_log_prob = log(p_node * p_action + 1e-9)
-    tot_entropy = masked_entropy(p_nodes, node_mask, num_graphs) + masked_entropy(
-        p_actions, predicate_mask, num_graphs
-    )  # H(X, Y) = H(X) + H(Y|X)
+    h_n = segmented_entropy(p_nodes, batch, num_graphs)
+    h_a = entropy(p_actions)
+    tot_entropy = (h_n + h_a).mean()  # H(X, Y) = H(X) + H(Y|X)
 
     a = concat_actions(predicate_action=a_action, object_action=a_node)
 
@@ -529,9 +525,9 @@ def eval_node_then_action(
     # p_node = where(predicate_action.squeeze() == 0, ones_like(p_node), p_node)
 
     tot_log_prob = log(p_node * p_action + 1e-9)
-    tot_entropy = masked_entropy(p_nodes, node_mask, num_graphs) + masked_entropy(
-        p_actions, predicate_mask, num_graphs
-    )  # H(X, Y) = H(X) + H(Y|X)
+    h_n = segmented_entropy(p_nodes, batch, num_graphs)
+    h_a = entropy(p_actions)
+    tot_entropy = (h_n + h_a).mean()  # H(X, Y) = H(X) + H(Y|X)
 
     assert not (p_node == 0).any(), "node probabilities must be non-zero"
     assert tot_log_prob.shape[0] == predicate_mask.shape[0]
@@ -589,9 +585,9 @@ def eval_action_then_node(
     p_node = where(predicate_action.squeeze() == 0, ones_like(p_node), p_node)
 
     tot_log_prob = log(p_action * p_node + 1e-9)
-    tot_entropy = masked_entropy(
-        p_actions, predicate_mask, num_graphs
-    ) + masked_entropy(p_nodes, node_mask, num_graphs)  # H(X, Y) = H(X) + H(Y|X)
+    h_p = entropy(p_actions)
+    h_n = segmented_entropy(p_nodes, batch, num_graphs)
+    tot_entropy = (h_p + h_n).mean()  # H(X, Y) = H(X) + H(Y|X)
 
     # assert not (a2_p == 0).any(), "node probabilities must be non-zero"
     assert tot_log_prob.shape[0] == num_graphs
