@@ -1,7 +1,8 @@
+import pytest
 import torch as th
 from torch import all
+
 import gnn_policy.functional as F
-import pytest
 
 
 def data_splits_and_starts():

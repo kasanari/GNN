@@ -16,23 +16,21 @@ from stable_baselines3.common.distributions import (
 from stable_baselines3.common.policies import BasePolicy
 from stable_baselines3.common.torch_layers import (
     BaseFeaturesExtractor,
-    FlattenExtractor,
 )
 from stable_baselines3.common.type_aliases import Schedule
 from torch import Tensor, nn
 
 from .functional import (
+    eval_action_and_node,
+    eval_action_then_node,
+    eval_node_then_action,
     sample_action_and_node,
     sample_action_then_node,
     sample_node,
     sample_node_then_action,
     segmented_gather,
-    eval_action_and_node,
-    eval_action_then_node,
-    eval_node_then_action,
 )
 from .gnn_extractor import GNNExtractor
-from .gnns import MultiMessagePassing
 from .node_extractor import NodeExtractor
 
 

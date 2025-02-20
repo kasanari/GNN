@@ -1,36 +1,31 @@
 from collections.abc import Callable
 from functools import partial
-import jax.numpy as jnp
-from jax.numpy import (
-    log,
-    stack,
-    nonzero,
-    flatnonzero,
-    argmax,
-    where,
-    roll,
-    cumsum,
-    concatenate,
-    prod,
-    ones_like,
-    zeros,
-    isinf,
-    array,
-    any,
-    sum,
-    max,
-    exp,
-)
-from jax.lax import split
-from jax.random import categorical
-from jax import random
-import jax.nn as nn
-from jax import Array, vmap, jit
-import jax
 from typing import TypeAlias
 
+import jax
+import jax.nn as nn
+import jax.numpy as jnp
 import numpy as np
-
+from jax import Array, jit, random, vmap
+from jax.lax import split
+from jax.numpy import (
+    any,
+    argmax,
+    array,
+    concatenate,
+    cumsum,
+    exp,
+    flatnonzero,
+    isinf,
+    log,
+    ones_like,
+    prod,
+    roll,
+    stack,
+    sum,
+    where,
+)
+from jax.random import categorical
 
 BatchIdx: TypeAlias = Array
 Mask: TypeAlias = Array

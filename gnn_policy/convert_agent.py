@@ -1,7 +1,8 @@
-from stable_baselines3 import A2C
-import torch
 import sys
 from pathlib import Path
+
+import torch
+from stable_baselines3 import A2C
 
 
 def convert(agent_file: Path):

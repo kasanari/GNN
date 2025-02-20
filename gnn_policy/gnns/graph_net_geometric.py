@@ -1,6 +1,4 @@
-import numpy as np
 import torch
-import torch_geometric
 from torch.nn import LeakyReLU, Linear, Module, Sequential
 from torch_geometric.nn import MessagePassing
 from torch_geometric.nn.aggr import AttentionalAggregation

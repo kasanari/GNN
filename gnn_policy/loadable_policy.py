@@ -1,6 +1,7 @@
 import gymnasium as gym
 import torch as th
 from torch import Tensor, nn
+from torch_geometric.data import Batch, Data
 
 from gnn_policy.functional import (
     sample_action_and_node,
@@ -11,8 +12,6 @@ from gnn_policy.gnn_extractor import GNNExtractor
 from gnn_policy.gnns import MultiMessagePassing
 from gnn_policy.gnns.graph_net_local import LocalMultiMessagePassing
 from gnn_policy.node_extractor import NodeExtractor
-
-from torch_geometric.data import Data, Batch
 
 
 def create_masks(obs: dict[str, Tensor]):

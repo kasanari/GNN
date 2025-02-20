@@ -1,6 +1,5 @@
-import collections
 from functools import partial
-from typing import Any, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Dict, Optional, Tuple, Type
 
 import gymnasium as gym
 import numpy as np

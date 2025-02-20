@@ -1,7 +1,8 @@
-from jax.numpy import array, log, where, isclose, all
-from jax import random
-import gnn_policy.kinda_composed as F
 import pytest
+from jax import random
+from jax.numpy import all, array, isclose, log, where
+
+import gnn_policy.kinda_composed as F
 
 
 def data_splits_and_starts():
