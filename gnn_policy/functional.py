@@ -1,22 +1,22 @@
 import torch as th
-from torch import Tensor, nn
-from torch_scatter import scatter
 from torch import (
+    Tensor,
+    argmax,
+    cat,
+    cumsum,
     log,
+    multinomial,
+    nn,
+    nonzero,
+    prod,
+    roll,
     split,
     stack,
-    nonzero,
-    argmax,
-    where,
-    roll,
-    cumsum,
     tensor,
-    cat,
-    prod,
-    multinomial,
-    ones_like,
+    where,
     zeros,
 )
+from torch_scatter import scatter
 
 
 # @th.jit.script
