@@ -1,8 +1,8 @@
-from jax.numpy import array, log, where, isclose, asarray, all
-from jax import random
-import gnn_policy.functional_jax as F
 import pytest
-from jax.numpy import float32
+from jax import random
+from jax.numpy import all, array, asarray, float32, isclose, log, where
+
+import gnn_policy.functional_jax as F
 
 
 def data_splits_and_starts():
@@ -93,12 +93,12 @@ def test_sample_node():
 
 def test_entropy():
     p = array([0.5, 0.5])
-    e = F.entropy(p, 1)
+    e = F.entropy(p)
     e = e * 1 / log(array(2.0))
     assert e == array(1.0)
 
     p = array([[1.0, 0.0], [1 / 2, 1 / 2]])
-    e = F.entropy(p, 2)
+    e = F.entropy(p)
     e = e * 1 / log(array(2.0))
     assert e == array(0.5)
 
@@ -106,13 +106,15 @@ def test_entropy():
 def test_masked_entropy():
     p = array([[0.5, 0.5]])
     mask = array([[True, True]])
-    e = F.masked_entropy(p, mask, 1)
+    p = p * mask
+    e = F.entropy(p)
     e = e * 1 / log(array(2.0))
     assert e.item() == 1.0
 
     p = array([[1 / 2, 0.0, 0.0], [0.0, 1 / 2, 1.0]])
     mask = array([[True, False, False], [False, True, False]])
-    e = F.masked_entropy(p, mask, 2)
+    p = p * mask
+    e = F.entropy(p)
     e = e * 1 / log(array(2.0))
     assert e.item() == 0.5
 
@@ -122,10 +124,11 @@ def test_sample_action_given_node():
     action_mask = array([True, True])
     node = array([1])
     n_nodes = array([3])
+    ds = F.data_starts(n_nodes)
     key = random.key(42)
     n_graphs = 1
-    action_logits = F.action_logits_given_node(x, node, n_nodes)
-    masked_action_logits = F.mask_logits(action_mask, action_logits)
+    action_logits = F.action_logits_given_node(x, node, ds)
+    masked_action_logits = F.mask_logits(action_logits, action_mask)
     key, *keys = random.split(key, n_graphs + 1)
     a = F.sample_action(asarray(keys), masked_action_logits, False)
     assert all(a == array([1]))
@@ -134,9 +137,10 @@ def test_sample_action_given_node():
     action_mask = array([[True, True], [False, True]])
     node = array([1, 0])
     n_nodes = array([2, 1])
+    data_starts = F.data_starts(n_nodes)
     n_graphs = 2
-    action_logits = F.action_logits_given_node(x, node, n_nodes)
-    masked_action_logits = F.mask_logits(action_mask, action_logits)
+    action_logits = F.action_logits_given_node(x, node, data_starts)
+    masked_action_logits = F.mask_logits(action_logits, action_mask)
     _, *keys = random.split(key, n_graphs + 1)
     a = F.sample_action(asarray(keys), masked_action_logits, False)
     assert all(a == array([1, 1]))
@@ -150,7 +154,7 @@ def test_sample_node_given_action():
     n_graphs = 1
     key = random.key(42)
     node_logits = F.node_logits_given_action(x, action, batch)
-    masked_logits = F.mask_logits(node_mask, node_logits)
+    masked_logits = F.mask_logits(node_logits, node_mask)
 
     a = F.sample_node(
         key,
@@ -169,7 +173,7 @@ def test_sample_node_given_action():
     n_graphs = 2
 
     node_logits = F.node_logits_given_action(x, action, batch)
-    masked_logits = F.mask_logits(node_mask, node_logits)
+    masked_logits = F.mask_logits(node_logits, node_mask)
     key = random.key(42)
 
     a = F.sample_node(
@@ -233,7 +237,7 @@ def test_sample_action_then_node():
     )  # ln(p(a | n))
 
     action_mask = array([[True, True], [True, True]])
-    node_mask = array([True, True, True, True, True])
+    node_given_action_mask = array([[True, True, True, True, True]] * 2).squeeze().T
     batch = array([0, 0, 0, 1, 1])
     key = random.key(42)
     n_nodes = array([3, 2])
@@ -245,7 +249,7 @@ def test_sample_action_then_node():
         action_given_node_logits,
         node_given_action_logits,
         action_mask,
-        node_mask,
+        node_given_action_mask,
         batch,
         n_nodes,
         False,
@@ -261,7 +265,7 @@ def test_sample_action_then_node():
         action_given_node_logits,
         node_given_action_logits,
         action_mask,
-        node_mask,
+        node_given_action_mask,
         batch,
         n_nodes,
     )
@@ -288,7 +292,9 @@ def test_sample_node_then_action():
     # action 1 is masked in the first graph
     # action 0 is masked in the second graph
 
-    action_mask = array([[True, False], [False, True]])
+    action_given_node_mask = array(
+        [[[True, False]] * 3 + [[False, True]] * 2]
+    ).squeeze()
     batch = array([0, 0, 0, 1, 1])
     key = random.key(42)
 
@@ -296,8 +302,8 @@ def test_sample_node_then_action():
         key,
         action_logits,
         node_logits,
-        action_mask,
         node_mask,
+        action_given_node_mask,
         batch,
         n_nodes,
         False,
@@ -309,8 +315,8 @@ def test_sample_node_then_action():
         a,
         action_logits,
         node_logits,
-        action_mask,
         node_mask,
+        action_given_node_mask,
         batch,
         n_nodes,
     )
@@ -334,8 +340,8 @@ def test_sample_node_set():
 
 
 if __name__ == "__main__":
-    import jax.profiler
 
+    test_entropy()
     test_sample_action_given_node()
     test_sample_node()
     # test_sample_node_set()
@@ -343,7 +349,6 @@ if __name__ == "__main__":
     test_sample_action_then_node()
     # test_sample_action_and_node()
     test_sample_node_given_action()
-    test_entropy()
     test_masked_entropy()
     test_graph_action()
     test_segmented_gather()
