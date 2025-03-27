@@ -7,8 +7,18 @@ import jax.nn as nn
 import jax.numpy as jnp
 import numpy as np
 from jax import Array, jit, lax, random, vmap
-from jax.numpy import (arange, argmax, asarray, cumsum, exp, expand_dims,
-                       log, roll, sum, where)
+from jax.numpy import (
+    arange,
+    argmax,
+    asarray,
+    cumsum,
+    exp,
+    expand_dims,
+    log,
+    roll,
+    sum,
+    where,
+)
 from jax.ops import segment_max, segment_sum
 from jax.random import categorical, gumbel
 
@@ -369,7 +379,7 @@ def sample_action_and_node(
     )
 
 
-@partial(jit, static_argnames=("deterministic",))
+@partial(jit, static_argnames=("deterministic", "n_graphs"))
 def sample_action_then_node(
     key: Tensor,
     node_logits: Tensor,
@@ -379,6 +389,7 @@ def sample_action_then_node(
     action_given_node_mask: Tensor,
     batch: Tensor,
     n_nodes: Tensor,
+    n_graphs: int,
     deterministic: bool,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
     assert predicate_mask.ndim == 2, "action mask must be 2D"
@@ -386,7 +397,7 @@ def sample_action_then_node(
     assert node_given_action_logits.ndim == 2, "node embeddings must be 2D"
     assert node_logits.ndim == 1, "graph embeddings must be 2D"
 
-    num_graphs = n_nodes.shape[0]
+    num_graphs = n_graphs
     ds = data_starts(n_nodes)
 
     action_logits = marginalize_logits(
@@ -592,7 +603,7 @@ def eval_node_then_action(
     return (tot_log_prob, tot_entropy, p_actions, p_nodes)
 
 
-@jit
+@partial(jit, static_argnames=("n_graphs",))
 def eval_action_then_node(
     eval_action: Tensor,
     node_logits: Tensor,
@@ -602,6 +613,7 @@ def eval_action_then_node(
     node_given_action_mask: Tensor,
     batch: Tensor,
     n_nodes: Tensor,
+    n_graphs: int,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     predicate_action = eval_action[:, 0]  # .long().view(-1, 1)
     # The node actions are locally indexed, so we need to convert them to global indices
@@ -616,7 +628,7 @@ def eval_action_then_node(
     assert predicate_action.ndim == 1
     assert predicate_action.ndim == 1
 
-    num_graphs = n_nodes.shape[0]
+    num_graphs = n_graphs
 
     p_actions = marginalize(
         node_logits,
