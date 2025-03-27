@@ -1,21 +1,6 @@
 import torch as th
-from torch import (
-    Tensor,
-    argmax,
-    cat,
-    cumsum,
-    log,
-    multinomial,
-    nn,
-    nonzero,
-    prod,
-    roll,
-    split,
-    stack,
-    tensor,
-    where,
-    zeros,
-)
+from torch import (Tensor, argmax, cat, cumsum, log, multinomial, nn, nonzero,
+                   prod, roll, split, stack, tensor, where, zeros)
 from torch_scatter import scatter
 
 

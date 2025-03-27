@@ -6,30 +6,18 @@ import gymnasium as gym
 import numpy as np
 import torch as th
 from stable_baselines3.common.distributions import (
-    BernoulliDistribution,
-    CategoricalDistribution,
-    DiagGaussianDistribution,
-    MultiCategoricalDistribution,
-    StateDependentNoiseDistribution,
-    make_proba_distribution,
-)
+    BernoulliDistribution, CategoricalDistribution, DiagGaussianDistribution,
+    MultiCategoricalDistribution, StateDependentNoiseDistribution,
+    make_proba_distribution)
 from stable_baselines3.common.policies import BasePolicy
-from stable_baselines3.common.torch_layers import (
-    BaseFeaturesExtractor,
-)
+from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.type_aliases import Schedule
 from torch import Tensor, nn
 
-from .functional import (
-    eval_action_and_node,
-    eval_action_then_node,
-    eval_node_then_action,
-    sample_action_and_node,
-    sample_action_then_node,
-    sample_node,
-    sample_node_then_action,
-    segmented_gather,
-)
+from .functional import (eval_action_and_node, eval_action_then_node,
+                         eval_node_then_action, sample_action_and_node,
+                         sample_action_then_node, sample_node,
+                         sample_node_then_action, segmented_gather)
 from .gnn_extractor import GNNExtractor
 from .node_extractor import NodeExtractor
 

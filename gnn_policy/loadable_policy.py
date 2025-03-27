@@ -3,11 +3,9 @@ import torch as th
 from torch import Tensor, nn
 from torch_geometric.data import Batch, Data
 
-from gnn_policy.functional import (
-    sample_action_and_node,
-    sample_action_then_node,
-    sample_node_then_action,
-)
+from gnn_policy.functional import (sample_action_and_node,
+                                   sample_action_then_node,
+                                   sample_node_then_action)
 from gnn_policy.gnn_extractor import GNNExtractor
 from gnn_policy.gnns import MultiMessagePassing
 from gnn_policy.gnns.graph_net_local import LocalMultiMessagePassing

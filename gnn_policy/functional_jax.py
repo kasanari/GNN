@@ -7,19 +7,8 @@ import jax.nn as nn
 import jax.numpy as jnp
 import numpy as np
 from jax import Array, jit, lax, random, vmap
-from jax.numpy import (
-    arange,
-    argmax,
-    asarray,
-    cumsum,
-    exp,
-    expand_dims,
-    isinf,
-    log,
-    roll,
-    sum,
-    where,
-)
+from jax.numpy import (arange, argmax, asarray, cumsum, exp, expand_dims,
+                       log, roll, sum, where)
 from jax.ops import segment_max, segment_sum
 from jax.random import categorical, gumbel
 

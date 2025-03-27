@@ -8,23 +8,9 @@ import jax.numpy as jnp
 import numpy as np
 from jax import Array, jit, random, vmap
 from jax.lax import split
-from jax.numpy import (
-    any,
-    argmax,
-    array,
-    concatenate,
-    cumsum,
-    exp,
-    flatnonzero,
-    isinf,
-    log,
-    ones_like,
-    prod,
-    roll,
-    stack,
-    sum,
-    where,
-)
+from jax.numpy import (any, argmax, array, concatenate, cumsum, exp,
+                       flatnonzero, isinf, log, ones_like, prod, roll, stack,
+                       sum, where)
 from jax.random import categorical
 
 BatchIdx: TypeAlias = Array

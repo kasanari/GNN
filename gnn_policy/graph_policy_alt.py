@@ -5,22 +5,15 @@ import gymnasium as gym
 import numpy as np
 import torch as th
 from stable_baselines3.common.distributions import (
-    BernoulliDistribution,
-    CategoricalDistribution,
-    MultiCategoricalDistribution,
-    make_proba_distribution,
-)
+    BernoulliDistribution, CategoricalDistribution,
+    MultiCategoricalDistribution, make_proba_distribution)
 from stable_baselines3.common.policies import BasePolicy
 from stable_baselines3.common.type_aliases import Schedule
 from torch import Tensor, nn
 
-from .functional import (
-    sample_action_and_node,
-    sample_action_then_node,
-    sample_node,
-    sample_node_then_action,
-    segmented_gather,
-)
+from .functional import (sample_action_and_node, sample_action_then_node,
+                         sample_node, sample_node_then_action,
+                         segmented_gather)
 
 
 class GNNPolicy(BasePolicy):
