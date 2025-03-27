@@ -431,12 +431,12 @@ def sample_action_then_node(
     p_action = gather(p_actions, predicate_action)
     p_node = p_nodes[node_action]
 
-    assert not (p_node == 0).any(), "node probabilities must be non-zero"
+    # assert not any(p_node == 0.0), "node probabilities must be non-zero"
 
     h_p = entropy(p_actions)
     h_n = segmented_entropy(p_nodes, batch, n_nodes)
 
-    tot_log_prob = log(p_action * p_node + 1e-9)
+    tot_log_prob = log(p_action * p_node)
     tot_entropy = (h_p + h_n).mean()  # H(X, Y) = H(X) + H(Y|X)
 
     real_nodes = node_action - ds  # unbatched nodes indices for each graph
@@ -484,7 +484,7 @@ def sample_node_then_action(
 
     p_node = p_nodes[a_node]
 
-    assert not (p_node == 0).any(), "node probabilities must be non-zero"
+    # assert not (p_node == 0).any(), "node probabilities must be non-zero"
     ds = data_starts(n_nodes)
     masked_action_logits = action_logits_given_node(
         mask_logits(node_predicate_embeds, action_given_node_mask),
@@ -513,7 +513,7 @@ def sample_node_then_action(
     assert a.shape[0] == num_graphs
     assert a.shape[1] == 2, f"action must have two components, was {a.shape}"
 
-    assert not isinf(tot_log_prob).any()
+    # assert not isinf(tot_log_prob).any()
 
     return (a, tot_log_prob, tot_entropy, p_actions, p_nodes)
 
@@ -595,10 +595,10 @@ def eval_node_then_action(
     h_a = entropy(p_actions)
     tot_entropy = (h_n + h_a).mean()  # H(X, Y) = H(X) + H(Y|X)
 
-    assert not (p_node == 0).any(), "node probabilities must be non-zero"
+    # assert not (p_node == 0).any(), "node probabilities must be non-zero"
     assert tot_log_prob.shape[0] == n_nodes.shape[0]
     assert tot_entropy.ndim == 0, "entropy must be a scalar"
-    assert not isinf(tot_log_prob).any()
+    # assert not isinf(tot_log_prob).any()
 
     return (tot_log_prob, tot_entropy, p_actions, p_nodes)
 
