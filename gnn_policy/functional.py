@@ -1,6 +1,24 @@
 import torch as th
-from torch import (Tensor, argmax, cat, cumsum, log, multinomial, nn, nonzero,
-                   prod, roll, split, stack, tensor, where, zeros)
+from torch import (
+    Tensor,
+    argmax,
+    cat,
+    cumsum,
+    exp,
+    isfinite,
+    log,
+    multinomial,
+    nn,
+    nonzero,
+    prod,
+    roll,
+    split,
+    stack,
+    tensor,
+    where,
+    zeros,
+    zeros_like,
+)
 from torch_scatter import scatter
 
 
@@ -12,6 +30,11 @@ def segment_sum(x: Tensor, index: Tensor, num_segments: int, dim: int = 0) -> Te
 # @th.jit.script
 def segment_mean(x: Tensor, index: Tensor, num_segments: int, dim: int = 0) -> Tensor:
     return scatter(x, index, dim, dim_size=num_segments, reduce="mean")
+
+
+# @th.jit.script
+def segment_max(x: Tensor, index: Tensor, num_segments: int, dim: int = 0) -> Tensor:
+    return scatter(x, index, dim, dim_size=num_segments, reduce="max")
 
 
 # @th.jit.script
@@ -150,6 +173,30 @@ def segmented_argmax(probs: Tensor, splits: list[int]) -> Tensor:
     samples = [argmax(x.squeeze(-1), dim=-1).reshape(1) for x in probs_split]
 
     return stack(samples)
+
+
+def segment_logsumexp(
+    a: Tensor,
+    segment_ids: Tensor,
+    num_segments: int,
+) -> Tensor:
+    # take the max along the axis
+    amax = segment_max(a, segment_ids, num_segments)
+
+    # replace infs with zeros
+    amax = where(isfinite(amax), amax, zeros_like(amax))
+    expanded_amax = amax[segment_ids]
+
+    # subtract the max to avoid overflow
+    exp_a = exp(a - expanded_amax)
+
+    # sum over the axis
+    sumexp = segment_sum(exp_a, segment_ids, num_segments)
+
+    # add the max back
+    out = log(sumexp) + amax
+
+    return out
 
 
 # @th.jit.script
