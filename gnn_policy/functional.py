@@ -307,7 +307,7 @@ def sample_action_then_node(
     assert predicate_mask.ndim == 2, "action mask must be 2D"
     assert action_given_node_mask.ndim == 2, "node mask must be 1D"
     assert node_given_action_logits.ndim == 2, "node embeddings must be 2D"
-    assert node_logits.ndim == 1, "graph embeddings must be 2D"
+    assert node_logits.ndim == 1, f"node logits must be 1D, is {node_logits.shape}"
     # assert node_logits.shape[1] == predicate_mask.shape[1]
     num_graphs = n_nodes.shape[0]
 
