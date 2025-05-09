@@ -40,6 +40,23 @@ def test_masked_softmax():
     ).all()
 
 
+def test_segmented_logsumexp():
+    logits = th.tensor([50, 0, 50])
+    mask = th.tensor([True, False, True])
+    batch_ind = th.tensor([0, 0, 0])
+    masked_logits = F.mask_logits(logits, mask)
+    logsumexp = F.segment_logsumexp(masked_logits, batch_ind, 1)
+    assert logsumexp.shape == (1,)
+    assert logsumexp.item() == 50.0
+
+    logits = th.tensor([[50, 0, 50], [0, 50, 0], [20, 20, 20]])
+    mask = th.tensor([[True, False, True], [False, True, False], [True, True, True]])
+    masked_logits = F.mask_logits(logits, mask)
+    logsumexp = F.segment_logsumexp(masked_logits)
+    assert logsumexp.shape == (3,)
+    assert (logsumexp == th.tensor([50.0, 50.0, 60.0])).all()
+
+
 def test_segmented_sample():
     probs = th.tensor([0.1, 0.0, 1.0, 0.0, 0.0])
     splits = [2, 3]
