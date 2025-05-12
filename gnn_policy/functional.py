@@ -184,19 +184,19 @@ def segment_logsumexp(
     amax = segment_max(a, segment_ids, num_segments)
 
     # replace infs with zeros
-    amax = where(isfinite(amax), amax, zeros_like(amax))
-    expanded_amax = amax[segment_ids]
+    shift = where(isfinite(amax), amax, zeros_like(amax))
+    expanded_shift = shift[segment_ids]
 
     # subtract the max to avoid overflow
-    exp_a = exp(a - expanded_amax)
+    exp_a = exp(a - expanded_shift)
 
     # sum over the axis
     sumexp = segment_sum(exp_a, segment_ids, num_segments)
 
     # add the max back
-    out = log(sumexp) + amax
+    out = th.log(sumexp) + amax
 
-    return out
+    return th.atleast_1d(out.squeeze())
 
 
 # @th.jit.script
@@ -273,9 +273,9 @@ def sample_action_and_node(
     p_node = segmented_gather(p_nodes, a_node, data_starts)
 
     tot_log_prob = log(p_action * p_node)
-    tot_entropy = masked_entropy(
-        p_actions, predicate_mask, num_graphs
-    ) + masked_entropy(p_nodes, node_mask, num_graphs)  # H(X, Y) = H(X) + H(Y|X)
+    h_a = entropy(p_actions)
+    h_n = segmented_entropy(p_nodes, batch, num_graphs)
+    tot_entropy = (h_a + h_n).mean()  # H(X, Y) = H(X) + H(Y|X)
 
     a = concat_actions(predicate_action=a_action, object_action=a_node)
 
@@ -506,9 +506,9 @@ def eval_action_and_node(
     _, data_starts = data_splits_and_starts(n_nodes)
     p_node = segmented_gather(p_nodes, a2, data_starts)
     tot_log_prob = log(p_action * p_node + 1e-9)
-    tot_entropy = masked_entropy(
-        p_actions, predicate_mask, num_graphs
-    ) + masked_entropy(p_nodes, node_mask, num_graphs)  # H(X, Y) = H(X) + H(Y|X)
+    h_a = entropy(p_actions)
+    h_n = segmented_entropy(p_nodes, batch, num_graphs)
+    tot_entropy = (h_a + h_n).mean()  # H(X, Y) = H(X) + H(Y|X)
 
     assert tot_log_prob.shape[0] == predicate_mask.shape[0]
     assert tot_entropy.ndim == 0, "entropy must be a scalar"

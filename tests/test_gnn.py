@@ -1,13 +1,13 @@
 import pytest
 import torch as th
 from torch import all
-
+import numpy as np
 import gnn_policy.functional as F
 
 
 def data_splits_and_starts():
-    batch_idx = th.tensor([0, 0, 0, 1, 1, 1])
-    splits, starts = F.data_splits_and_starts(batch_idx)
+    n_nodes = th.tensor([3, 3])
+    splits, starts = F.data_splits_and_starts(n_nodes)
     assert splits == [3, 3]
     assert all(starts == th.tensor([0, 3]))
     assert len(splits) == len(starts)
@@ -41,20 +41,21 @@ def test_masked_softmax():
 
 
 def test_segmented_logsumexp():
-    logits = th.tensor([50, 0, 50])
+    logits = th.tensor([50, 0, 40])
     mask = th.tensor([True, False, True])
     batch_ind = th.tensor([0, 0, 0])
     masked_logits = F.mask_logits(logits, mask)
-    logsumexp = F.segment_logsumexp(masked_logits, batch_ind, 1)
-    assert logsumexp.shape == (1,)
-    assert logsumexp.item() == 50.0
+    lse = F.segment_logsumexp(masked_logits, batch_ind, 1)
+    assert lse.shape == (1,)
+    assert np.isclose(lse.item(), 50.0, atol=0.1)
 
-    logits = th.tensor([[50, 0, 50], [0, 50, 0], [20, 20, 20]])
-    mask = th.tensor([[True, False, True], [False, True, False], [True, True, True]])
+    logits = th.tensor([50, 0, 40, 0, 50, 0, 20, 20, 20])
+    mask = th.tensor([True, False, True, False, True, False, True, True, True])
+    batch_ind = th.tensor([0, 0, 0, 0, 1, 1, 2, 2, 2])
     masked_logits = F.mask_logits(logits, mask)
-    logsumexp = F.segment_logsumexp(masked_logits)
-    assert logsumexp.shape == (3,)
-    assert (logsumexp == th.tensor([50.0, 50.0, 60.0])).all()
+    lse = F.segment_logsumexp(masked_logits, batch_ind, 3)
+    assert lse.shape == (3,)
+    assert th.isclose(lse, th.tensor([50.0, 50.0, 21.0986]), atol=0.1).all()
 
 
 def test_segmented_sample():
@@ -111,28 +112,25 @@ def test_sample_node():
 
 def test_entropy():
     p = th.tensor([[0.5, 0.5]])
-    e = F.entropy(p, 1)
-    e = e * 1 / th.log(th.tensor(2.0))
+    e = F.entropy(p)
+    e = e * 1.0 / th.log(th.tensor(2.0))
     assert e.item() == 1.0
 
     p = th.tensor([[1.0, 0.0], [1 / 2, 1 / 2]])
-    e = F.entropy(p, 2)
+    e = F.entropy(p)
     e = e * 1 / th.log(th.tensor(2.0))
-    assert e.item() == 0.5
+    assert (e == th.tensor([0.0, 1.0])).all()
+
+    assert e.mean().item() == 0.5
 
 
-def test_masked_entropy():
-    p = th.tensor([[0.5, 0.5]])
-    mask = th.tensor([[True, True]])
-    e = F.masked_entropy(p, mask, 1)
+def test_segmented_entropy():
+    p = th.tensor([0.5, 0.5, 1.0, 0.0])
+    batch_idx = th.tensor([0, 0, 1, 1])
+    n_graphs = 2
+    e = F.segmented_entropy(p, batch_idx, n_graphs)
     e = e * 1 / th.log(th.tensor(2.0))
-    assert e.item() == 1.0
-
-    p = th.tensor([[1 / 2, 0.0, 0.0], [0.0, 1 / 2, 1.0]])
-    mask = th.tensor([[True, False, False], [False, True, False]])
-    e = F.masked_entropy(p, mask, 2)
-    e = e * 1 / th.log(th.tensor(2.0))
-    assert e.item() == 0.5
+    assert (e == th.tensor([1.0, 0.0])).all()
 
 
 def test_sample_action_given_node():
@@ -240,8 +238,8 @@ def test_sample_action_then_node(deterministic: bool):
         [[10, 100], [0, 0], [0, 0]], dtype=th.float32
     )  # ln(p(a | n))
 
-    mask1 = th.tensor([[True, False]])
-    mask2 = th.tensor([True, True, False])
+    action_mask = th.tensor([[True, False]])
+    node_given_action_mask = th.tensor([[True, True, False]] * 2).T
     batch = th.tensor([0, 0, 0])
     n_nodes = th.tensor([3])
 
@@ -249,8 +247,8 @@ def test_sample_action_then_node(deterministic: bool):
         node_logits,
         action_given_node_logits,
         node_given_action_logits,
-        mask1,
-        mask2,
+        action_mask,
+        node_given_action_mask,
         batch,
         n_nodes,
         deterministic=deterministic,
@@ -263,8 +261,8 @@ def test_sample_action_then_node(deterministic: bool):
         node_logits,
         action_given_node_logits,
         node_given_action_logits,
-        mask1,
-        mask2,
+        action_mask,
+        node_given_action_mask,
         batch,
         n_nodes,
     )
@@ -278,16 +276,16 @@ def test_sample_action_then_node(deterministic: bool):
 def test_sample_node_then_action(deterministic: bool):
     node_logits = th.tensor([10, 100, 0])
     action_given_node_logits = th.tensor([[10, 100], [0, 10], [100, 0]])
-    mask1 = th.tensor([True, False, True])
-    mask2 = th.tensor([[True, False]])
+    node_mask = th.tensor([True, False, True])
+    action_given_node_mask = th.tensor([[True, False]])
     batch = th.tensor([0, 0, 0])
     n_nodes = th.tensor([3])
 
     a, logprob, h, *_ = F.sample_node_then_action(
         action_given_node_logits,
         node_logits,
-        mask2,
-        mask1,
+        node_mask,
+        action_given_node_mask,
         batch,
         n_nodes,
         deterministic=deterministic,
@@ -299,8 +297,8 @@ def test_sample_node_then_action(deterministic: bool):
         a,
         action_given_node_logits,
         node_logits,
-        mask2,
-        mask1,
+        node_mask,
+        action_given_node_mask,
         batch,
         n_nodes,
     )
@@ -320,4 +318,23 @@ def test_sample_node_set():
     assert (a[0] == th.tensor([0, 1])).all()
     assert logprob.shape == (1,)
 
+    pass
+
+
+if __name__ == "__main__":
+    test_segmented_logsumexp()
+    test_entropy()
+    test_segmented_entropy()
+    test_sample_action_given_node()
+    test_sample_node()
+    # test_sample_node_set()
+    test_sample_node_then_action(deterministic=False)
+    test_sample_action_then_node(deterministic=False)
+    test_sample_action_and_node()
+    test_sample_node_given_action()
+    test_graph_action()
+    test_segmented_gather()
+    test_segmented_sample()
+    test_masked_segmented_softmax()
+    data_splits_and_starts()
     pass
