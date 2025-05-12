@@ -212,13 +212,13 @@ def segmented_scatter_(
 def entropy(p: Tensor) -> Tensor:
     log_probs = log(p + 1e-9)  # to avoid log(0)
     entropy = -p * log_probs
-    return entropy.mean(-1)
+    return entropy.sum(-1)
 
 
 def segmented_entropy(p: Tensor, indices: Tensor, n_graphs: int) -> Tensor:
     log_probs = log(p + 1e-9)  # to avoid log(0)
     entropy = -p * log_probs
-    return scatter(entropy, indices, dim=0, dim_size=n_graphs, reduce="mean")
+    return scatter(entropy, indices, dim=0, dim_size=n_graphs, reduce="sum")
 
 
 # @th.jit.script
