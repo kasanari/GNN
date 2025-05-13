@@ -311,13 +311,15 @@ def sample_action_then_node(
     # assert node_logits.shape[1] == predicate_mask.shape[1]
     num_graphs = n_nodes.shape[0]
 
-    p_actions = marginalize(
-        node_logits,
-        action_given_node_logits,
+    action_logits = segment_logsumexp(
+        action_given_node_logits + node_logits.unsqueeze(-1),
         batch,
         num_graphs,
     )
-    p_actions = p_actions * predicate_mask
+
+    action_logits = mask_logits(action_logits, predicate_mask)
+    p_actions = softmax(action_logits)
+
     predicate_action = sample_action(p_actions, deterministic)
 
     p_nodes = node_probs(
@@ -597,13 +599,14 @@ def eval_action_then_node(
 
     num_graphs = n_nodes.shape[0]
 
-    p_actions = marginalize(
-        node_logits,
-        action_given_node_logits,
+    action_logits = segment_logsumexp(
+        action_given_node_logits + node_logits.unsqueeze(-1),
         batch,
         num_graphs,
     )
-    p_actions = p_actions * predicate_mask
+
+    action_logits = mask_logits(action_logits, predicate_mask)
+    p_actions = softmax(action_logits)
 
     p_nodes = node_probs(
         node_logits_given_action(
