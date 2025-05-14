@@ -422,32 +422,32 @@ def sample_action_then_node(
     node_logits: Tensor,
     action_given_node_logits: Tensor,
     node_given_action_logits: Tensor,
-    predicate_mask: Tensor,
     action_given_node_mask: Tensor,
+    node_given_action_mask: Tensor,
     batch: Tensor,
     n_nodes: Tensor,
     deterministic: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-    assert predicate_mask.ndim == 2, "action mask must be 2D"
+    assert node_given_action_mask.ndim == 2, "action mask must be 2D"
     assert action_given_node_mask.ndim == 2, "node mask must be 1D"
     assert node_given_action_logits.ndim == 2, "node embeddings must be 2D"
     assert node_logits.ndim == 1, f"node logits must be 1D, is {node_logits.shape}"
     num_graphs = n_nodes.shape[0]
 
     action_logits = segment_logsumexp(
-        action_given_node_logits + node_logits.unsqueeze(-1),
+        mask_logits(action_given_node_logits, action_given_node_mask)
+        + node_logits.unsqueeze(-1),
         batch,
         num_graphs,
     )
 
-    predicate_action, log_action, h_p, p_actions = choose_masked(
+    predicate_action, log_action, h_p, p_actions = choose(
         action_logits,
-        predicate_mask,
         deterministic=deterministic,
     )
 
     node_logits = node_logits_given_action(
-        mask_logits(node_given_action_logits, action_given_node_mask),
+        mask_logits(node_given_action_logits, node_given_action_mask),
         predicate_action,
         batch,
     )
@@ -481,13 +481,13 @@ def sample_action_then_node(
 def sample_node_then_action(
     node_predicate_embeds: Tensor,
     node_logits: Tensor,
-    node_mask: Tensor,
     action_given_node_mask: Tensor,
+    node_given_action_mask: Tensor,
     batch: Tensor,
     n_nodes: Tensor,
     deterministic: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-    assert node_mask.ndim == 1, "node mask must be 1D"
+    assert node_given_action_mask.ndim == 2, "action mask must be 2D"
     assert node_logits.ndim == 1, "node logits must be 1D, was {}".format(
         node_logits.shape
     )
@@ -498,9 +498,8 @@ def sample_node_then_action(
 
     num_graphs = n_nodes.shape[0]
 
-    node_action, log_node, h_n, p_nodes = segmented_choice_masked(
+    node_action, log_node, h_n, p_nodes = segmented_choice(
         node_logits,
-        node_mask,
         batch,
         n_nodes,
         deterministic=deterministic,
@@ -610,15 +609,15 @@ def eval_node_then_action(
     eval_action: Tensor,
     node_predicate_embeds: Tensor,
     node_logits: Tensor,
-    node_mask: Tensor,
     action_given_node_mask: Tensor,
+    node_given_action_mask: Tensor,
     batch: Tensor,
     n_nodes: Tensor,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     node_action = eval_action[:, 1].long().view(-1, 1)
     predicate_action = eval_action[:, 0].long().view(-1, 1)
 
-    assert node_mask.ndim == 1, "node mask must be 1D"
+    assert node_given_action_mask.ndim == 2, "action mask must be 2D"
     assert node_logits.ndim == 1, "node logits must be 1D"
     assert action_given_node_mask.ndim == 2, "action mask must be 2D"
     assert node_predicate_embeds.ndim == 2, "node action embeddings must be 2D"
@@ -627,10 +626,9 @@ def eval_node_then_action(
     assert predicate_action.ndim == 2
     assert predicate_action.shape[-1] == 1
 
-    log_node, h_n, p_nodes = segmented_evaluate_action_masked(
+    log_node, h_n, p_nodes = segmented_evaluate_action(
         node_action,
         node_logits,
-        node_mask,
         batch,
         n_nodes,
     )
@@ -662,14 +660,14 @@ def eval_action_then_node(
     node_logits: Tensor,
     action_given_node_logits: Tensor,
     node_given_action_logits: Tensor,
-    predicate_mask: Tensor,
+    action_given_node_mask: Tensor,
     node_given_action_mask: Tensor,
     batch: Tensor,
     n_nodes: Tensor,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     node_action = eval_action[:, 1].long().view(-1, 1)
     predicate_action = eval_action[:, 0].long().view(-1, 1)
-    assert predicate_mask.ndim == 2, "action mask must be 2D"
+    assert action_given_node_mask.ndim == 2, "action mask must be 2D"
     assert node_given_action_mask.ndim == 2, "node mask must be 2D"
     assert node_given_action_logits.ndim == 2, "action|node embeddings must be 2D"
     assert node_given_action_logits.ndim == 2, "node|action embeddings must be 2D"
@@ -681,15 +679,15 @@ def eval_action_then_node(
     num_graphs = n_nodes.shape[0]
 
     action_logits = segment_logsumexp(
-        action_given_node_logits + node_logits.unsqueeze(-1),
+        mask_logits(action_given_node_logits, action_given_node_mask)
+        + node_logits.unsqueeze(-1),
         batch,
         num_graphs,
     )
 
-    log_action, h_p, p_actions = evaluate_action_masked(
+    log_action, h_p, p_actions = evaluate_action(
         predicate_action,
         action_logits,
-        predicate_mask,
     )
 
     node_logits = node_logits_given_action(
