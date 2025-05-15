@@ -320,7 +320,7 @@ def segment_logsumexp(
     # add the max back
     out = th.log(sumexp) + amax
 
-    return th.atleast_1d(out.squeeze())
+    return out
 
 
 # @th.jit.script

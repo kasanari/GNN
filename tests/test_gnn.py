@@ -276,34 +276,34 @@ def test_sample_action_then_node(deterministic: bool):
 def test_sample_node_then_action(deterministic: bool):
     node_logits = th.tensor([10, 100, 0])
     action_given_node_logits = th.tensor([[10, 100], [0, 10], [100, 0]])
-    node_mask = th.tensor([True, False, True])
-    action_given_node_mask = th.tensor([[True, False]])
+    node_given_action_mask = th.tensor([[True, False, True]] * 2).T
+    action_given_node_mask = th.tensor([[True, False]] * 3)
     batch = th.tensor([0, 0, 0])
     n_nodes = th.tensor([3])
 
     a, logprob, h, *_ = F.sample_node_then_action(
         action_given_node_logits,
         node_logits,
-        node_mask,
         action_given_node_mask,
+        node_given_action_mask,
         batch,
         n_nodes,
         deterministic=deterministic,
     )
-    assert (a == th.tensor([[0, 0]])).all()
+    assert (a == th.tensor([[0, 1]])).all()
     assert logprob.shape == (1,)
 
     eval_logprob, h, *_ = F.eval_node_then_action(
         a,
         action_given_node_logits,
         node_logits,
-        node_mask,
         action_given_node_mask,
+        node_given_action_mask,
         batch,
         n_nodes,
     )
 
-    assert (a == th.tensor([[0, 0]])).all()
+    assert (a == th.tensor([[0, 1]])).all()
     assert eval_logprob.shape == (1,)
     assert eval_logprob == logprob
 
